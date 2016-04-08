@@ -6,6 +6,7 @@ authors = ["Forkk <forkk@forkk.net>"]
 [build]
 
 [dependencies]
+time = "0.1"
 rustbox = { git = "https://github.com/gchp/rustbox.git" }
 
 [dependencies.common]

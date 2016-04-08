@@ -6,7 +6,6 @@ description = "An IRC client with a distributed, client-server architecture like
 
 [dependencies]
 
-
 [dependencies.common]
 version = "0.1.0"
 path = "common"

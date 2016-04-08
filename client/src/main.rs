@@ -1,4 +1,5 @@
 extern crate rustbox;
+extern crate time;
 
 mod ui;
 

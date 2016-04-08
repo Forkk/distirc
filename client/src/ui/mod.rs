@@ -1,15 +1,21 @@
+use std::rc::Rc;
+use std::cell::RefCell;
 use rustbox;
 use rustbox::{ RustBox, Event, Key };
 
 
+mod buffer;
 mod entry;
 
 use self::entry::TextEntry;
+use self::buffer::{ Buffer, BufHandle };
 
 /// Stores the terminal UI's state.
 pub struct TermUi {
     rb: RustBox,
     entry: TextEntry,
+    view: Buffer,
+    status_bh: Rc<RefCell<BufHandle>>,
     quit: bool,
 }
 
@@ -19,10 +25,17 @@ impl TermUi {
             input_mode: rustbox::InputMode::Current,
             buffer_stderr: true,
         }));
+
+        let mut bh = BufHandle::new();
+        bh.push_status("Welcome to distirc's terminal UI!");
+        let bh = Rc::new(RefCell::new(bh));
+
         let entry = TextEntry::new();
         Ok(TermUi {
             rb: rb,
             entry: entry,
+            view: Buffer::new(bh.clone()),
+            status_bh: bh,
             quit: false,
         })
     }
@@ -47,6 +60,7 @@ impl TermUi {
                 }
             }
 
+            self.view.update();
             self.render();
         }
     }
@@ -55,6 +69,8 @@ impl TermUi {
     pub fn handle_input(&mut self, line: String) {
         if line == "/quit" {
             self.quit = true;
+        } else {
+            self.status_bh.borrow_mut().push_status(&line);
         }
     }
 
@@ -67,12 +83,15 @@ impl TermUi {
 
     pub fn handle_key(&mut self, key: &Key) {
         match *key {
+            Key::PageUp => self.view.scroll_by(10),
+            Key::PageDown => self.view.scroll_by(-10),
             _ => {},
         }
     }
 
     /// Initializes UI widgets.
     fn init(&mut self) {
+        self.view.update();
         self.render();
     }
 
@@ -80,6 +99,7 @@ impl TermUi {
         self.rb.clear();
 
         self.entry.render(&mut self.rb);
+        self.view.render(&mut self.rb);
 
         self.rb.present();
     }
