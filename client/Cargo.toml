@@ -1,0 +1,13 @@
+[package]
+name = "client"
+version = "0.1.0"
+authors = ["Forkk <forkk@forkk.net>"]
+
+[build]
+
+[dependencies]
+rustbox = { git = "https://github.com/gchp/rustbox.git" }
+
+[dependencies.common]
+version = "0.1.0"
+path = "../common"

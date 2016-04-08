@@ -1,0 +1,12 @@
+[package]
+name = "distirc"
+version = "0.1.0"
+authors = ["Forkk <forkk@forkk.net>"]
+description = "An IRC client with a distributed, client-server architecture like Quassel."
+
+[dependencies]
+
+
+[dependencies.common]
+version = "0.1.0"
+path = "common"
