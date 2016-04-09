@@ -6,7 +6,8 @@ use rustbox::{ RustBox, Event, Key, Style, Color };
 /// The IRC client's text box.
 pub struct TextEntry {
     // FIXME: Store cursor position as a pair of terminal column and string index.
-    cursor_pos: isize,
+    cursor_idx: usize,
+    cursor_col: isize,
     hist: VecDeque<String>,
     hist_pos: usize,
     /// Queue of entries that haven't been processed yet.
@@ -18,7 +19,8 @@ impl TextEntry {
         let mut hist = VecDeque::new();
         hist.push_front(String::new());
         TextEntry {
-            cursor_pos: 0,
+            cursor_idx: 0,
+            cursor_col: 0,
             hist: hist,
             hist_pos: 0,
             cmds: VecDeque::new(),
@@ -31,9 +33,6 @@ impl TextEntry {
     }
 
     pub fn render(&self, rb: &mut RustBox) {
-        debug_assert!(self.cursor_pos >= 0);
-        debug_assert!(self.cursor_pos <= self.get_text().len() as isize);
-
         let h = rb.height();
         rb.print(0, h - 1, Style::empty(), Color::Default, Color::Default, self.get_text());
         rb.set_cursor(self.cursor_col(), h as isize - 1);
@@ -47,36 +46,45 @@ impl TextEntry {
             Event::KeyEvent(key) => self.handle_key(&key),
             _ => false,
         };
-        debug_assert!(self.cursor_pos >= 0);
-        debug_assert!(self.cursor_pos <= self.get_text().len() as isize);
+        debug_assert!(self.cursor_col >= 0);
+        debug_assert!(self.cursor_idx <= self.get_text().len());
+        debug_assert!{
+            // Check that cursor_col lines up with the number of the char at
+            // cursor_idx.
+            if let Some((idx, _)) = self.hist[self.hist_pos].char_indices().nth(self.cursor_col as usize) {
+                idx == self.cursor_idx
+            } else {
+                self.cursor_idx == self.hist[self.hist_pos].len()
+            },
+            "Cursor column misaligned with cursor index"
+        }
         ret
     }
 
     fn handle_key(&mut self, key: &Key) -> bool {
         match *key {
             Key::Char(ch) => {
-                // FIXME: This will break on multi-byte unicode characters.
-                self.hist[self.hist_pos].insert(self.cursor_pos as usize, ch);
-                self.move_cursor(|p| p + 1);
+                self.hist[self.hist_pos].insert(self.cursor_idx as usize, ch);
+                self.move_cursor_by(1);
                 true
             },
             Key::Backspace => {
-                if self.cursor_pos > 0 {
-                    self.hist[self.hist_pos].remove(self.cursor_pos as usize - 1);
-                    self.move_cursor(|p| p - 1);
+                if self.cursor_col > 0 {
+                    self.move_cursor_by(-1);
+                    self.hist[self.hist_pos].remove(self.cursor_idx as usize);
                 }
                 true
             },
-            Key::Left => { self.move_cursor(|p| p - 1); true },
-            Key::Right => { self.move_cursor(|p| p + 1); true },
-            Key::Home => { self.move_cursor(|_| 0); true },
-            Key::End => { self.cursor_to_end(); true },
+            Key::Left => { self.move_cursor_by(-1); true },
+            Key::Right => { self.move_cursor_by(1); true },
+            Key::Home => { self.move_cursor_home(); true },
+            Key::End => { self.move_cursor_end(); true },
             Key::Enter => {
                 let text = self.get_text().to_owned();
                 if !text.is_empty() {
                     self.cmds.push_back(text);
                     self.push_hist();
-                    self.move_cursor(|_| 0);
+                    self.move_cursor_home();
                 }
                 true
             },
@@ -84,14 +92,14 @@ impl TextEntry {
                 if self.hist_pos+1 < self.hist.len() {
                     self.hist_pos += 1;
                 }
-                self.cursor_to_end();
+                self.move_cursor_end();
                 true
             },
             Key::Down => {
                 if self.hist_pos > 0 {
                     self.hist_pos -= 1;
                 }
-                self.cursor_to_end();
+                self.move_cursor_end();
                 true
             },
             _ => false,
@@ -105,22 +113,43 @@ impl TextEntry {
 
 
     fn cursor_col(&self) -> isize {
-        self.cursor_pos as isize
+        self.cursor_col
     }
 
-    fn move_cursor<F>(&mut self, f: F) where F : Fn(isize) -> isize {
-        let new = f(self.cursor_pos);
-        if new > self.get_text().len() as isize {
-            self.cursor_pos = self.get_text().len() as isize
-        } else if new < 0 {
-            self.cursor_pos = 0;
-        } else {
-            self.cursor_pos = new;
+    fn move_cursor_by(&mut self, by: isize) {
+        let ref text = self.hist[self.hist_pos];
+        if by > 0 {
+            // Moving right, we slice the string from our current index to the
+            // end and find the next boundary in the sub-string.
+            let mut idxs = text[self.cursor_idx..].char_indices();
+            if let Some((new, _)) = idxs.nth(by as usize) {
+                // Add the previous cursor index to the index within the subslice.
+                self.cursor_idx = self.cursor_idx + new;
+                self.cursor_col += by;
+            } else {
+                self.cursor_idx = text.len();
+                self.cursor_col = text.chars().count() as isize;
+            }
+        } else if by < 0 {
+            let mut idxs = text[..self.cursor_idx].char_indices().rev();
+            if let Some((new, _)) = idxs.nth((-by) as usize - 1) {
+                self.cursor_idx = new;
+                self.cursor_col += by;
+            } else {
+                self.cursor_idx = 0;
+                self.cursor_col = 0;
+            }
         }
     }
 
-    fn cursor_to_end(&mut self) {
-        self.cursor_pos = self.get_text().len() as isize;
+    fn move_cursor_home(&mut self) {
+        self.cursor_idx = 0;
+        self.cursor_col = 0;
+    }
+
+    fn move_cursor_end(&mut self) {
+        self.cursor_idx = self.get_text().len();
+        self.cursor_col = self.get_text().chars().count() as isize;
     }
 
 
@@ -183,17 +212,70 @@ mod test {
     }
 
     #[test]
-    fn move_past_ends() {
+    fn backspace() {
+        // Tests typing in the middle of the line.
         let mut entry = TextEntry::new();
-        press_chars(&mut entry, "test");
-        press_times(&mut entry, Key::Left, 40);
+        press_chars(&mut entry, "IRC sucks");
+        press_times(&mut entry, Key::Backspace, 5);
+        press_chars(&mut entry, "is awesome!");
         press_key(&mut entry, Key::Enter);
-        assert_eq!(Some("test".to_owned()), entry.next_entry());
+        assert_eq!(Some("IRC is awesome!".to_owned()), entry.next_entry());
+    }
 
-        press_chars(&mut entry, "test");
-        press_times(&mut entry, Key::Right, 40);
+    #[test]
+    fn multibyte_char_basic_typing() {
+        let mut entry = TextEntry::new();
+        press_chars(&mut entry, "こんにちわ");
         press_key(&mut entry, Key::Enter);
-        assert_eq!(Some("test".to_owned()), entry.next_entry());
+        assert_eq!(Some("こんにちわ".to_owned()), entry.next_entry());
+    }
+
+    #[test]
+    fn multibyte_char_insert_typing() {
+        let mut entry = TextEntry::new();
+        press_chars(&mut entry, "これはです");
+        press_times(&mut entry, Key::Left, 2);
+        press_chars(&mut entry, "テスト");
+        press_key(&mut entry, Key::Enter);
+        assert_eq!(Some("これはテストです".to_owned()), entry.next_entry());
+    }
+
+    #[test]
+    fn cursor_move_left() {
+        let mut entry = TextEntry::new();
+
+        press_chars(&mut entry, "This is test");
+        press_times(&mut entry, Key::Left, 4);
+        press_chars(&mut entry, "a ");
+        press_key(&mut entry, Key::Enter);
+        assert_eq!(Some("This is a test".to_owned()), entry.next_entry());
+
+        press_chars(&mut entry, "これはです");
+        press_times(&mut entry, Key::Left, 2);
+        press_chars(&mut entry, "テスト");
+        press_key(&mut entry, Key::Enter);
+        assert_eq!(Some("これはテストです".to_owned()), entry.next_entry());
+    }
+
+    #[test]
+    fn cursor_move_right() {
+        // Also tests the home key.
+        let mut entry = TextEntry::new();
+
+        press_chars(&mut entry, "This is test");
+        press_key(&mut entry, Key::Home);
+        press_times(&mut entry, Key::Right, 8);
+        press_chars(&mut entry, "a ");
+        press_key(&mut entry, Key::Enter);
+        assert_eq!(Some("This is a test".to_owned()), entry.next_entry());
+
+        press_chars(&mut entry, "これはです");
+        press_key(&mut entry, Key::Home);
+        press_times(&mut entry, Key::Right, 3);
+        press_chars(&mut entry, "テスト");
+        println!("Text: {}", entry.get_text());
+        press_key(&mut entry, Key::Enter);
+        assert_eq!(Some("これはテストです".to_owned()), entry.next_entry());
     }
 
     #[test]
@@ -234,23 +316,22 @@ mod test {
         press_chars(&mut entry, "Entry 1");
         press_key(&mut entry, Key::Enter);
         assert_eq!(Some("Entry 1".to_owned()), entry.next_entry());
-        press_chars(&mut entry, "Another entry 2");
+        press_chars(&mut entry, "Another entry");
         press_key(&mut entry, Key::Enter);
-        assert_eq!(Some("Another entry 2".to_owned()), entry.next_entry());
+        assert_eq!(Some("Another entry".to_owned()), entry.next_entry());
         press_chars(&mut entry, "Entry 3");
         press_key(&mut entry, Key::Enter);
         assert_eq!(Some("Entry 3".to_owned()), entry.next_entry());
 
         // Cycle up to "Another entry 2"
         press_times(&mut entry, Key::Up, 2);
+        assert_eq!("Another entry", entry.get_text());
+        press_chars(&mut entry, " 2");
         assert_eq!("Another entry 2", entry.get_text());
-        press_key(&mut entry, Key::Backspace);
-        press_chars(&mut entry, "4");
-        assert_eq!("Another entry 4", entry.get_text());
         press_key(&mut entry, Key::Enter);
 
         assert_eq!("", entry.get_text());
         press_key(&mut entry, Key::Up);
-        assert_eq!("Another entry 4", entry.get_text());
+        assert_eq!("Another entry 2", entry.get_text());
     }
 }
