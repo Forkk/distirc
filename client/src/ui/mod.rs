@@ -6,15 +6,17 @@ use rustbox::{ RustBox, Event, Key };
 
 mod buffer;
 mod entry;
+mod bar;
 
 use self::entry::TextEntry;
 use self::buffer::{ Buffer, BufHandle };
+use self::bar::{ StatusBar, MainBar };
 
 /// Stores the terminal UI's state.
 pub struct TermUi {
     rb: RustBox,
-    entry: TextEntry,
-    view: Buffer,
+    pub entry: TextEntry,
+    pub view: Buffer,
     status_bh: Rc<RefCell<BufHandle>>,
     quit: bool,
 }
@@ -34,7 +36,7 @@ impl TermUi {
         Ok(TermUi {
             rb: rb,
             entry: entry,
-            view: Buffer::new(bh.clone()),
+            view: Buffer::new("*status*", bh.clone()),
             status_bh: bh,
             quit: false,
         })
@@ -42,7 +44,16 @@ impl TermUi {
 
     /// The main function. Runs the client.
     pub fn main(&mut self) {
-        self.init();
+        // Status bars below the buffer.
+        let mut upper_bars: Vec<Box<StatusBar>> = vec![
+        ];
+        // Status bars above the buffer.
+        let mut lower_bars: Vec<Box<StatusBar>> = vec![
+            Box::new(MainBar) as Box<StatusBar>,
+        ];
+
+        self.view.update();
+        self.render(&mut upper_bars, &mut lower_bars);
 
         'main: while !self.quit {
             // TODO: Don't crash when this fails.
@@ -60,10 +71,14 @@ impl TermUi {
                 }
             }
 
+            for bar in upper_bars.iter_mut() { bar.update(self); }
+            for bar in lower_bars.iter_mut() { bar.update(self); }
+
             self.view.update();
-            self.render();
+            self.render(&mut upper_bars, &mut lower_bars);
         }
     }
+
 
     /// Handles something typed into the text entry.
     pub fn handle_input(&mut self, line: String) {
@@ -89,17 +104,27 @@ impl TermUi {
         }
     }
 
-    /// Initializes UI widgets.
-    fn init(&mut self) {
-        self.view.update();
-        self.render();
-    }
 
-    fn render(&mut self) {
+    /// Renders the UI.
+    ///
+    /// `btop` and `bbot` are the status bars on the top and bottom
+    /// of the buffer view.
+    fn render(&mut self, btop: &mut Vec<Box<StatusBar>>, bbot: &mut Vec<Box<StatusBar>>) {
         self.rb.clear();
 
         self.entry.render(&mut self.rb);
-        self.view.render(&mut self.rb);
+
+        let y1 = btop.len();
+        let y2 = self.rb.height() - 1 - bbot.len();
+        self.view.render(&mut self.rb, y1, y2);
+
+        for (y, bar) in btop.iter_mut().enumerate() {
+            bar.render(y, self);
+        }
+        let h = self.rb.height();
+        for (y, bar) in bbot.iter_mut().rev().enumerate() {
+            bar.render(h - 2 - y, self);
+        }
 
         self.rb.present();
     }

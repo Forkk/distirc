@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use time::{ Tm, now };
-use rustbox::{ RustBox, Style, Color };
+use rustbox::{ RustBox, Color };
 
 
 // TODO: Move model data to another module.
@@ -74,6 +74,8 @@ impl BufHandle {
 
 #[derive(Debug)]
 pub struct Buffer {
+    /// The name of the buffer.
+    name: String,
     /// Handle to the current buffer.
     handle: Rc<RefCell<BufHandle>>,
     lines: VecDeque<BufferLine>,
@@ -92,8 +94,9 @@ impl Buffer {
     ///
     /// The view maintains ownership over the buffer during its lifetime.
     /// To get the buffer back, call `into_buf`.
-    pub fn new(hand: Rc<RefCell<BufHandle>>) -> Buffer {
+    pub fn new(name: &str, hand: Rc<RefCell<BufHandle>>) -> Buffer {
         Buffer {
+            name: name.to_owned(),
             handle: hand,
             lines: VecDeque::new(),
             scroll: None,
@@ -126,8 +129,12 @@ impl Buffer {
 
 
     /// Displays the buffer on the terminal.
-    pub fn render(&mut self, rb: &mut RustBox) {
-        let mut y = rb.height() - 1;
+    ///
+    /// The buffer is rendered between rows `y1` and `y2` in the terminal.
+    pub fn render(&mut self, rb: &mut RustBox, y1: usize, y2: usize) {
+        debug_assert!(y1 < y2);
+        debug_assert!(y1 < rb.height());
+        let mut y = y2;
         let mut i = self.scroll.unwrap_or(0);
         while y > 0 && i < self.lines.len() {
             use rustbox::{ RB_NORMAL, RB_BOLD };
@@ -163,5 +170,10 @@ impl Buffer {
         } else {
             self.scroll = Some(new as usize);
         }
+    }
+
+
+    pub fn get_name(&self) -> &str {
+        &self.name
     }
 }
