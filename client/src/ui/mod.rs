@@ -3,13 +3,15 @@ use std::cell::RefCell;
 use rustbox;
 use rustbox::{ RustBox, Event, Key };
 
+use model::BufHandle;
+
 
 mod buffer;
 mod entry;
 mod bar;
 
 use self::entry::TextEntry;
-use self::buffer::{ Buffer, BufHandle };
+use self::buffer::{ Buffer };
 use self::bar::{ StatusBar, MainBar };
 
 /// Stores the terminal UI's state.

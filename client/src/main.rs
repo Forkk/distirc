@@ -1,7 +1,8 @@
 extern crate rustbox;
 extern crate time;
 
-mod ui;
+pub mod ui;
+pub mod model;
 
 use self::ui::TermUi;
 
