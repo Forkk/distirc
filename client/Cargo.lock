@@ -2,7 +2,6 @@
 name = "client"
 version = "0.1.0"
 dependencies = [
- "common 0.1.0",
  "rustbox 0.8.1 (git+https://github.com/gchp/rustbox.git)",
  "time 0.1.35 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -11,10 +10,6 @@ dependencies = [
 name = "bitflags"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "common"
-version = "0.1.0"
 
 [[package]]
 name = "gag"

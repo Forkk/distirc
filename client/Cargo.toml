@@ -8,7 +8,3 @@ authors = ["Forkk <forkk@forkk.net>"]
 [dependencies]
 time = "0.1"
 rustbox = { git = "https://github.com/gchp/rustbox.git" }
-
-[dependencies.common]
-version = "0.1.0"
-path = "../common"
