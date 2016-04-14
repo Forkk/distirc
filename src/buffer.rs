@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
 use irc::client::prelude::*;
 
-use line::{LineData, MsgKind, User, Sender};
+use line::{LineData, MsgKind, User};
+use conn::messages::BufInfo;
 
 /// A buffer within a network.
 #[derive(Debug, Clone)]
@@ -13,6 +14,7 @@ pub struct Buffer {
     joined: bool, // users: Vec<String>,
 }
 
+// Buffer behavior
 impl Buffer {
     pub fn new(name: &str) -> Buffer {
         Buffer {
@@ -92,8 +94,17 @@ impl Buffer {
     }
 }
 
+// Message data
+impl Buffer {
+    /// Gets `BufInfo` data for this buffer.
+    pub fn as_info(&self) -> BufInfo {
+        BufInfo {
+            name: self.name.clone(),
+        }
+    }
+}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct BufferLine {
     id: usize,
     data: LineData,

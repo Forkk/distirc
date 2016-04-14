@@ -1,6 +1,6 @@
 use irc::client::prelude::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub enum LineData {
     Message {
         kind: MsgKind,
@@ -29,25 +29,26 @@ pub enum LineData {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub enum MsgKind {
     PrivMsg,
     Notice,
-    /// IRC response codes
-    Response(Response),
+    // FIXME: The below is not encodable
+    // /// IRC response codes
+    // Response(Response),
     /// Special status messages
     Status,
 }
 
 /// Sender of a message
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub enum Sender {
     User(User),
     Server(String),
 }
 
 /// An IRC user sender
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub struct User {
     pub nick: String,
     pub ident: String,

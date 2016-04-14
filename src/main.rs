@@ -1,6 +1,7 @@
 #[macro_use] extern crate log;
 extern crate irc;
 extern crate env_logger;
+extern crate rustc_serialize;
 
 use std::collections::HashMap;
 use irc::client::prelude::Config;
@@ -11,6 +12,8 @@ pub mod network;
 pub mod buffer;
 pub mod line;
 pub mod util;
+pub mod types;
+pub mod conn;
 
 use self::config::{UserConfig, IrcNetConfig};
 use self::user::{UserThread};

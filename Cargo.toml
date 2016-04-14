@@ -8,3 +8,4 @@ description = "An IRC client with a distributed, client-server architecture like
 log = "0.3"
 env_logger = "0.3"
 irc = "0.11"
+rustc-serialize = "0.3"
