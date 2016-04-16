@@ -31,7 +31,8 @@ impl StatusBar for MainBar {
         use rustbox::Color::*;
         // use super::util::AlignCol::*;
 
-        let buf_name = ui.view.get_name();
+        let buf = ui.view.buf.borrow();
+        let buf_name = buf.name();
 
         ui.rb.blank_line(y, RB_NORMAL, Default, Black);
         ui.rb.print_cols(y)

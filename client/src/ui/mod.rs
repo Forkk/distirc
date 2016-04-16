@@ -1,6 +1,7 @@
 use std::collections::{VecDeque, HashMap};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::time::Duration;
 use rustbox;
 use rustbox::{ RustBox, Event, Key };
 
@@ -10,9 +11,8 @@ use common::messages::{
     ClientMsg,
 };
 
-use model::BufHandle;
+use model::{Buffer, BufSender};
 use conn::ConnThread;
-
 
 mod buffer;
 mod entry;
@@ -20,42 +20,39 @@ mod bar;
 mod util;
 
 use self::entry::TextEntry;
-use self::buffer::{ Buffer };
+use self::buffer::BufferView;
 use self::bar::{ StatusBar, MainBar };
 
 /// Stores the terminal UI's state.
 pub struct TermUi {
     rb: RustBox,
     pub entry: TextEntry,
-    pub view: Buffer,
+    pub view: BufferView,
+    // TODO: This should probably be made into an enum.
     // In the keys here, when the `NetId` is `None`, the value is a global
     // buffer. When the `BufId` is none and the `NetId` isn't, the buffer is the
-    // network's status buffer. When both are none, it is the client status
-    // buffer.
-    bufs: HashMap<(Option<NetId>, Option<BufId>), Rc<RefCell<BufHandle>>>,
+    // network's status buffer.
+    bufs: HashMap<(Option<NetId>, Option<BufId>), (Rc<RefCell<Buffer>>, Option<BufSender>)>,
     sendq: VecDeque<ClientMsg>,
     quit: bool,
 }
 
 impl TermUi {
-    pub fn new() -> Result<TermUi, rustbox::InitError> {
+    pub fn new(status: Buffer) -> Result<TermUi, rustbox::InitError> {
         let rb = try!(RustBox::init(rustbox::InitOptions {
             input_mode: rustbox::InputMode::Current,
             buffer_stderr: true,
         }));
 
-        let mut bh = BufHandle::new();
-        bh.push_status("Welcome to distirc's terminal UI!");
-        let bh = Rc::new(RefCell::new(bh));
-
         let mut bufs = HashMap::new();
-        bufs.insert((None, None), bh.clone());
+        let status = Rc::new(RefCell::new(status));
+        bufs.insert((None, None), (status.clone(), None));
 
         let entry = TextEntry::new();
         Ok(TermUi {
             rb: rb,
             entry: entry,
-            view: Buffer::new("*status*", bh.clone()),
+            view: BufferView::new(status),
             bufs: bufs,
             sendq: VecDeque::new(),
             quit: false,
@@ -72,45 +69,46 @@ impl TermUi {
             Box::new(MainBar) as Box<StatusBar>,
         ];
 
-        self.view.update();
-        self.render(&mut upper_bars, &mut lower_bars);
-
-        'main: while !self.quit {
+        'main: loop {
             while let Some(msg) = conn.recv() {
                 self.handle_msg(msg);
             }
 
-            // TODO: Don't crash when this fails.
-            let e = self.rb.poll_event(false).expect("Failed to get event");
-
-            if let Event::KeyEvent(Key::Ctrl('c')) = e {
-                break 'main;
-            }
-
-            if !self.entry.handle(&e) {
-                self.handle_event(&e);
-            } else {
-                if let Some(line) = self.entry.next_entry() {
-                    self.handle_input(line);
-                }
+            for (_, &mut (ref mut buf, _)) in self.bufs.iter_mut() {
+                buf.borrow_mut().update();
             }
 
             for bar in upper_bars.iter_mut() { bar.update(self); }
             for bar in lower_bars.iter_mut() { bar.update(self); }
 
-            self.view.update();
             self.render(&mut upper_bars, &mut lower_bars);
+
+            if let Ok(e) = self.rb.peek_event(Duration::from_millis(200), false) {
+                if let Event::KeyEvent(Key::Ctrl('c')) = e {
+                    break 'main;
+                }
+
+                if !self.entry.handle(&e) {
+                    self.handle_event(&e);
+                } else {
+                    if let Some(line) = self.entry.next_entry() {
+                        self.handle_input(line);
+                    }
+                }
+            }
+
+            if self.quit { break 'main; }
         }
     }
 
 
     /// Handles something typed into the text entry.
     pub fn handle_input(&mut self, line: String) {
+        debug!("Typed: {}", &line);
         if line == "/quit" {
             self.quit = true;
         } else {
             // TODO
-            // self.status_bh.borrow_mut().push_status(&line);
         }
     }
 
@@ -133,16 +131,21 @@ impl TermUi {
     pub fn handle_msg(&mut self, msg: CoreMsg) {
         match msg {
             CoreMsg::Networks(nets) => {
-                debug!("New networks: {:?}", nets);
+                info!("Adding networks: {:?}", nets);
+                // let mut bufs = String::new();
+                // for net in nets {
+                //     for buf in net.buffers {
+                //     }
+                // }
             },
             CoreMsg::GlobalBufs(bufs) => {
                 debug!("New global buffers: {:?}", bufs);
                 for buf in bufs {
-                    let key = (None, Some(buf.name));
+                    let key = (None, Some(buf.name.clone()));
                     if !self.bufs.contains_key(&key) {
-                        let bh = BufHandle::new();
-                        let bh = Rc::new(RefCell::new(bh));
-                        self.bufs.insert(key, bh);
+                        let (buf, bs) = Buffer::new(buf.name);
+                        let buf = Rc::new(RefCell::new(buf));
+                        self.bufs.insert(key, (buf, Some(bs)));
                     }
                 }
             },
@@ -163,11 +166,11 @@ impl TermUi {
             CoreNetMsg::Buffers(bufs) => {
                 debug!("New buffers for network {}: {:?}", net, bufs);
                 for buf in bufs {
-                    let key = (Some(net.clone()), Some(buf.name));
+                    let key = (Some(net.clone()), Some(buf.name.clone()));
                     if !self.bufs.contains_key(&key) {
-                        let bh = BufHandle::new();
-                        let bh = Rc::new(RefCell::new(bh));
-                        self.bufs.insert(key, bh);
+                        let (buf, bs) = Buffer::new(buf.name);
+                        let buf = Rc::new(RefCell::new(buf));
+                        self.bufs.insert(key, (buf, Some(bs)));
                     }
                 }
             },
@@ -180,9 +183,9 @@ impl TermUi {
     }
 
     pub fn handle_buf_msg(&mut self, key: (Option<NetId>, Option<BufId>), msg: CoreBufMsg) {
-        let bh = match self.bufs.get_mut(&key) {
-            Some(b) => b,
-            None => {
+        let bs = match self.bufs.get_mut(&key) {
+            Some(&mut (_, Some(ref mut bs))) => bs,
+            _ => {
                 error!("Ignoring message for unknown buffer: {:?}", key);
                 return;
             },
@@ -197,10 +200,14 @@ impl TermUi {
                 }
             },
             CoreBufMsg::NewLines(lines) => {
-                bh.borrow_mut().push_lines_front(lines);
+                for line in lines {
+                    bs.send_front(line);
+                }
             },
             CoreBufMsg::Scrollback(lines) => {
-                bh.borrow_mut().push_lines_back(lines);
+                for line in lines {
+                    bs.send_back(line);
+                }
             },
         }
     }
