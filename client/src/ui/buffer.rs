@@ -9,6 +9,7 @@ use common::messages::BufferLine;
 use common::line::{LineData, MsgKind};
 
 use model::BufHandle;
+use super::util::RustBoxExt;
 
 #[derive(Debug)]
 pub struct Buffer {
@@ -122,16 +123,14 @@ impl Buffer {
 
     fn render_line(&self, y: usize, rb: &mut RustBox, time: &str, from: &str, line: &str) {
         use rustbox::{RB_NORMAL, RB_BOLD};
+        use rustbox::Color::*;
+        use super::util::AlignCol::*;
 
-        let mut x = 0;
-        rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, time);
-        x += time.len() + 1;
-        rb.print_char(x, y, RB_NORMAL, Color::Default, Color::Default, '|');
-        x += 2;
-        let from = format!("{0: >1$}", from, self.name_col_w);
-        rb.print(x, y, RB_BOLD, Color::Default, Color::Default, &from);
-        x += from.len() + 1;
-        rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, line);
+        rb.print_cols(y) // style, fgcolor, bgcolor
+            .print_col_w(RB_NORMAL, Default, Default, Right(self.time_col_w), time)
+            .print_col(RB_NORMAL, Default, Default, " | ")
+            .print_col_w(RB_BOLD, Default, Default, Left(self.name_col_w), from)
+            .print_col(RB_NORMAL, Default, Default, line);
     }
 
 

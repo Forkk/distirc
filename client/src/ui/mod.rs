@@ -17,6 +17,7 @@ use conn::ConnThread;
 mod buffer;
 mod entry;
 mod bar;
+mod util;
 
 use self::entry::TextEntry;
 use self::buffer::{ Buffer };

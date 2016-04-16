@@ -6,6 +6,7 @@
 //! displays them on the terminal at the given y index.
 
 use super::TermUi;
+use super::util::RustBoxExt;
 
 pub trait StatusBar {
     /// Updates the status bar's state.
@@ -26,19 +27,17 @@ impl StatusBar for MainBar {
     }
 
     fn render(&mut self, y: usize, ui: &mut TermUi) {
-        use rustbox::{ Color, RB_NORMAL };
-
-        let w = ui.rb.width();
-
-        // 'w' many blank spaces
-        let blank = String::from_utf8(vec![b' '; w]).unwrap();
-        ui.rb.print(0, y, RB_NORMAL, Color::Default, Color::Black, &blank);
-
-        // let mut x = 0;
+        use rustbox::{RB_NORMAL};
+        use rustbox::Color::*;
+        // use super::util::AlignCol::*;
 
         let buf_name = ui.view.get_name();
-        let text = format!(" {} ", buf_name);
-        ui.rb.print(0, y, RB_NORMAL, Color::White, Color::Black, &text);
-        // x += text.len();
+
+        ui.rb.blank_line(y, RB_NORMAL, Default, Black);
+        ui.rb.print_cols(y)
+            .skip(1)
+            .print_col(RB_NORMAL, White, Black, buf_name)
+            .skip(1)
+            ;
     }
 }
