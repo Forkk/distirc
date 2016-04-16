@@ -1,12 +1,8 @@
+use common::messages::BufferLine;
+use common::line::{LineData, MsgKind};
+
 use time::{Tm, now};
 
-#[derive(Debug, Clone)]
-pub struct BufferLine {
-    pub id: usize,
-    pub time: Tm,
-    pub from: String,
-    pub text: String,
-}
 
 /// Represents a handle to a buffer.
 ///
@@ -34,13 +30,28 @@ impl BufHandle {
     /// Pushes a status message into the buffer.
     pub fn push_status(&mut self, msg: &str) {
         self.last_id += 1;
-        self.front_lines.push(BufferLine {
+        self.front_lines.push(BufferLine{
             id: self.last_id,
-            time: now(),
-            from: "status".to_owned(),
-            text: msg.to_owned(),
+            // time: now(),
+            data: LineData::Message {
+                from: "status".to_owned(),
+                msg: msg.to_owned(),
+                kind: MsgKind::Status,
+            },
         });
     }
+
+
+    /// Pushes new lines into the front buffer.
+    pub fn push_lines_front(&mut self, mut lines: Vec<BufferLine>) {
+        self.front_lines.append(&mut lines);
+    }
+
+    /// Pushes new lines into the back of the buffer.
+    pub fn push_lines_back(&mut self, mut lines: Vec<BufferLine>) {
+        self.back_lines.append(&mut lines);
+    }
+
 
     /// Takes all newly received front lines.
     pub fn take_new_front(&mut self) -> Vec<BufferLine> {

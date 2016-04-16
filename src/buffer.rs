@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use irc::client::prelude::*;
+use time::{Tm, now};
 
-use line::{LineData, MsgKind, User};
-use conn::messages::BufInfo;
+use common::line::{BufferLine, LineData, MsgKind, User};
+use common::messages::BufInfo;
 
 /// A buffer within a network.
 #[derive(Debug, Clone)]
@@ -30,6 +31,7 @@ impl Buffer {
     pub fn push_line(&mut self, data: LineData) {
         let line = BufferLine {
             id: self.line_id,
+            // time: now(),
             data: data,
         };
         trace!("Buffer {}: Pushing line {:?}", self.name, line);
@@ -102,10 +104,4 @@ impl Buffer {
             name: self.name.clone(),
         }
     }
-}
-
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub struct BufferLine {
-    id: usize,
-    data: LineData,
 }

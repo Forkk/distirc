@@ -5,7 +5,10 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use rustbox::{RustBox, Color};
 
-use model::{BufHandle, BufferLine};
+use common::messages::BufferLine;
+use common::line::{LineData, MsgKind};
+
+use model::BufHandle;
 
 #[derive(Debug)]
 pub struct Buffer {
@@ -72,26 +75,63 @@ impl Buffer {
         let mut y = y2;
         let mut i = self.scroll.unwrap_or(0);
         while y > 0 && i < self.lines.len() {
-            use rustbox::{RB_NORMAL, RB_BOLD};
-
             let ref line = self.lines[i];
 
             y -= 1;
             i += 1;
-            let timefmt = line.time.strftime("%H:%M:%S").expect("Failed to format time");
-            let time = format!("{0: >1$}", timefmt, self.time_col_w);
-            let name = format!("<{0: >1$}>:", line.from, self.name_col_w);
-            let ref text = line.text;
+            // let timefmt = line.time.strftime("%H:%M:%S").expect("Failed to format time");
+            // let time = format!("{0: >1$}", timefmt, self.time_col_w);
+            let time = "TODO";
 
-            let mut x = 0;
-            rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, &time);
-            x += time.len() + 1;
-            rb.print_char(x, y, RB_NORMAL, Color::Default, Color::Default, '|');
-            x += 2;
-            rb.print(x, y, RB_BOLD, Color::Default, Color::Default, &name);
-            x += name.len() + 1;
-            rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, &text);
+            match line.data {
+                LineData::Message { kind: ref _k, ref from, ref msg } => {
+                    let from = format!("<{}>", from);
+                    self.render_line(y, rb, time, &from, &msg);
+                },
+                LineData::Topic { ref by, ref topic } => {
+                    let user = by.clone().unwrap_or("*".to_owned());
+                    let line = format!("set topic to: {}", topic);
+                    self.render_line(y, rb, time, &user, &line);
+                },
+                LineData::Join { ref user } => {
+                    let from = format!("  {0: >1$}", "-->", self.name_col_w);
+                    let line = format!("{0} ({1}@{2}) has joined {3}",
+                                       user.nick, user.ident, user.host, self.name);
+                    self.render_line(y, rb, time, &from, &line);
+                },
+                LineData::Part { ref user, ref reason } => {
+                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
+                    let line = format!("{0} ({1}@{2}) has left {3} ({4})",
+                                       user.nick, user.ident, user.host, self.name, reason);
+                    self.render_line(y, rb, time, &from, &line);
+                },
+                LineData::Quit { ref user, ref msg } => {
+                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
+                    let line = format!("{0} ({1}@{2}) has quit ({3})",
+                                       user.nick, user.ident, user.host, msg);
+                    self.render_line(y, rb, time, &from, &line);
+                },
+                LineData::Kick { ref by, ref user, ref reason } => {
+                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
+                    let line = format!("{} was kicked by {} ({})", user, by.nick, reason);
+                    self.render_line(y, rb, time, &from, &line);
+                },
+            }
         }
+    }
+
+    fn render_line(&self, y: usize, rb: &mut RustBox, time: &str, from: &str, line: &str) {
+        use rustbox::{RB_NORMAL, RB_BOLD};
+
+        let mut x = 0;
+        rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, time);
+        x += time.len() + 1;
+        rb.print_char(x, y, RB_NORMAL, Color::Default, Color::Default, '|');
+        x += 2;
+        let from = format!("{0: >1$}", from, self.name_col_w);
+        rb.print(x, y, RB_BOLD, Color::Default, Color::Default, &from);
+        x += from.len() + 1;
+        rb.print(x, y, RB_NORMAL, Color::Default, Color::Default, line);
     }
 
 

@@ -1,6 +1,9 @@
 pub use self::core::{CoreMsg, CoreNetMsg, CoreBufMsg};
 pub use self::client::{ClientMsg, ClientNetMsg, ClientBufMsg};
 
+pub use line::BufferLine;
+pub use types::{NetId, BufId};
+
 // Auxillary data structures
 
 /// Short summary data used to tell a client about a network.
@@ -21,9 +24,9 @@ pub struct BufInfo {
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub enum BufTarget {
     /// An IRC channel buffer
-    Channel(String),
+    Channel(BufId),
     /// An IRC private message buffer with the given user.
-    Private(String),
+    Private(BufId),
     /// The network's status buffer.
     Network,
 }
@@ -32,7 +35,7 @@ pub enum BufTarget {
 // Message types
 
 mod core {
-    use buffer::BufferLine;
+    use line::BufferLine;
     use types::{NetId, BufId};
     use super::{BufTarget, NetInfo, BufInfo};
 
@@ -59,9 +62,6 @@ mod core {
         State {
             connected: bool,
         },
-
-        /// Wrapper for messages about the network's connection buffer.
-        NetBufMsg(CoreBufMsg),
 
         /// Wrapper for messages about a buffer within the network.
         BufMsg(BufTarget, CoreBufMsg),
@@ -94,9 +94,8 @@ mod core {
 }
 
 mod client {
-    use buffer::BufferLine;
     use types::{NetId, BufId};
-    use super::{BufTarget, NetInfo, BufInfo};
+    use super::BufTarget;
 
     /// Messages sent from the client.
     #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]

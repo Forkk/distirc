@@ -1,4 +1,11 @@
-use irc::client::prelude::*;
+// use irc::client::prelude::*;
+
+#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
+pub struct BufferLine {
+    pub id: usize,
+    // time: Tm,
+    pub data: LineData,
+}
 
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub enum LineData {

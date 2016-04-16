@@ -3,4 +3,4 @@
 
 mod buffer;
 
-pub use self::buffer::{BufHandle, BufferLine};
+pub use self::buffer::BufHandle;

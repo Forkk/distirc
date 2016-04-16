@@ -1,5 +1,5 @@
 [package]
-name = "client"
+name = "common"
 version = "0.1.0"
 authors = ["Forkk <forkk@forkk.net>"]
 
@@ -7,11 +7,10 @@ authors = ["Forkk <forkk@forkk.net>"]
 
 [dependencies]
 log = "0.3"
-env_logger = "0.3"
 time = "0.1"
 rotor = "0.6"
 rotor-stream = "0.6"
-rustbox = { git = "https://github.com/gchp/rustbox.git" }
-
-[dependencies.common]
-path = "../common"
+rustc-serialize = "0.3"
+bincode = "0.5"
+byteorder = "0.5"
+irc = "0.11"
