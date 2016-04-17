@@ -2,11 +2,9 @@
 
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::collections::VecDeque;
-use rustbox::{RustBox, Color};
+use rustbox::RustBox;
 
-use common::messages::BufferLine;
-use common::line::{LineData, MsgKind};
+use common::line::LineData;
 
 use model::Buffer;
 use super::util::RustBoxExt;

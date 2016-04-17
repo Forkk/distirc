@@ -31,6 +31,16 @@ pub enum BufTarget {
     Network,
 }
 
+impl BufTarget {
+    pub fn name(&self) -> &str {
+        match *self {
+            BufTarget::Channel(ref n) => n,
+            BufTarget::Private(ref n) => n,
+            BufTarget::Network => "*network*",
+        }
+    }
+}
+
 
 // Message types
 

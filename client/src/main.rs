@@ -31,8 +31,8 @@ fn main() {
     let addr = "127.0.0.1:4242".parse::<SocketAddr>().unwrap();
     let conn = ConnThread::spawn(addr);
 
-    let mut ui = TermUi::new(buf).expect("Failed to initialize UI");
-    ui.main(conn);
+    let mut ui = TermUi::new(buf, conn).expect("Failed to initialize UI");
+    ui.main();
 }
 
 

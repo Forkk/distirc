@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::collections::hash_map;
 use irc::client::prelude::*;
+use rotor::Notifier;
 
+use common::messages::CoreMsg;
 use common::types::NetId;
 
 use network::IrcNetwork;
@@ -16,15 +18,19 @@ use config::{UserConfig, IrcNetConfig};
 // #[derive(Debug)]
 pub struct UserState {
     networks: HashMap<NetId, IrcNetwork>,
+    wake: Notifier,
 }
 
 impl UserState {
-    pub fn new() -> UserState {
-        UserState { networks: HashMap::new() }
+    pub fn new(wake: Notifier) -> UserState {
+        UserState {
+            networks: HashMap::new(),
+            wake: wake,
+        }
     }
 
-    pub fn from_cfg(cfg: UserConfig) -> UserState {
-        let mut us = Self::new();
+    pub fn from_cfg(wake: Notifier, cfg: UserConfig) -> UserState {
+        let mut us = Self::new(wake);
         for (name, net_cfg) in cfg.networks.iter() {
             us.add_server(&name, net_cfg);
         }
@@ -37,14 +43,14 @@ impl UserState {
 
     pub fn init(&mut self) {
         for (_, mut net) in self.networks.iter_mut() {
-            net.connect().unwrap(); // FIXME: Handle this error
+            net.connect(self.wake.clone()).unwrap(); // FIXME: Handle this error
         }
     }
 
     /// Process messages from servers and clients
-    pub fn update(&mut self) {
+    pub fn update(&mut self, msgs: &mut Vec<CoreMsg>) {
         for (_, serv) in self.networks.iter_mut() {
-            serv.update();
+            serv.update(msgs);
         }
     }
 

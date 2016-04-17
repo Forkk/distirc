@@ -9,7 +9,8 @@ extern crate time;
 extern crate common;
 
 use std::collections::HashMap;
-use rotor::{Loop, Config as LoopCfg};
+use rotor::{Machine, Response, Scope, EventSet, Loop, Config as LoopCfg};
+use rotor::void::Void;
 use rotor::mio::tcp::TcpListener;
 use rotor_stream::Accept;
 use irc::client::prelude::Config as IrcConfig;
@@ -23,8 +24,15 @@ pub mod buffer;
 pub mod core;
 
 use self::config::{UserConfig, IrcNetConfig};
-use self::core::{Client, Context};
+use self::core::{Client, Context, Updater};
 // use self::user::{UserThread};
+
+rotor_compose!{
+    pub enum Fsm/Seed<Context> {
+        Client(Accept<ConnStream<Client>, TcpListener>),
+        Updater(Updater),
+    }
+}
 
 fn main() {
     env_logger::init().expect("Failed to initialize logger");
@@ -44,19 +52,26 @@ fn main() {
     });
     debug!("Created test config.");
 
-    debug!("Creating context.");
-    let mut ctx = Context::new();
-    ctx.add_user("Forkk", cfg);
-
-    debug!("Initializing context.");
-    ctx.init();
-
     debug!("Creating loop.");
     let mut loop_creator = Loop::new(&LoopCfg::new()).unwrap();
     let sock = TcpListener::bind(&"127.0.0.1:4242".parse().unwrap()).unwrap();
     loop_creator.add_machine_with(|scope| {
-        Accept::<ConnStream<Client>, _>::new(sock, (), scope)
+        Accept::<ConnStream<Client>, _>::new(sock, (), scope).wrap(Fsm::Client)
     }).unwrap();
+
+    let mut notif = None;
+    loop_creator.add_machine_with(|scope| {
+        notif = Some(scope.notifier());
+        Response::ok(Updater).wrap(Fsm::Updater)
+    });
+    let notif = notif.expect("Notifier was not set.");
+
+    debug!("Creating context.");
+    let mut ctx = Context::new(notif);
+    ctx.add_user("Forkk", cfg);
+
+    debug!("Initializing context.");
+    ctx.init();
 
     debug!("Starting");
     loop_creator.run(ctx).unwrap();

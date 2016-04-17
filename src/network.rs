@@ -3,8 +3,9 @@ use std::thread;
 use std::sync::mpsc::{channel, Receiver};
 use std::collections::HashMap;
 use irc::client::prelude::*;
+use rotor::Notifier;
 
-use common::messages::NetInfo;
+use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
 use common::line::{Sender, User};
 use common::types::{NetId, BufId};
 
@@ -35,7 +36,7 @@ impl IrcNetwork {
     }
 
     /// Attempts to connect to the IRC network.
-    pub fn connect(&mut self) -> io::Result<()> {
+    pub fn connect(&mut self, notif: Notifier) -> io::Result<()> {
         info!("Connecting to IRC network");
         let c = try!(IrcServer::from_config(self.cfg.cfg.clone()));
         let (tx, rx) = channel();
@@ -46,9 +47,14 @@ impl IrcNetwork {
                 trace!("Received message: {:?}", m);
                 if let Ok(m) = m {
                     tx.send(m).expect("Failed to send channel message");
+                    notif.wakeup().expect("Failed to wake update thread");
                 }
             }
         });
+        // for chan in self.cfg.cfg.channels() {
+        //     info!("Adding initial channel: {}", chan);
+        //     self.chans.insert(chan.to_owned(), Buffer::new());
+        // }
         info!("Sending identification");
         try!(c.identify());
         self.conn = Some((c, rx));
@@ -56,7 +62,8 @@ impl IrcNetwork {
     }
 
     /// Processes messages from the server.
-    pub fn update(&mut self) {
+    pub fn update(&mut self, msgs: &mut Vec<CoreMsg>) {
+        let mut nms = vec![];
         let mut disconn = false;
         'recv: loop {
             let (m, nick) = if let Some((ref conn, ref mut rx)) = self.conn {
@@ -73,7 +80,11 @@ impl IrcNetwork {
             } else {
                 break 'recv;
             };
-            self.handle_msg(m, &nick);
+            self.handle_msg(m, &nick, &mut nms);
+        }
+
+        for msg in nms.into_iter() {
+            msgs.push(CoreMsg::NetMsg(self.name.clone(), msg));
         }
 
         if disconn {
@@ -82,29 +93,41 @@ impl IrcNetwork {
         }
     }
 
-    pub fn handle_msg(&mut self, msg: Message, nick: &str) {
+    pub fn handle_msg(&mut self, msg: Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
         let pfx = msg.prefix.clone().map(|p| Sender::parse_prefix(&p));
         match pfx {
-            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick),
+            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, msgs),
             Some(Sender::Server(_)) => {}
             None => {}
         }
     }
 
-    fn user_msg(&mut self, user: &User, msg: &Message, nick: &str) {
+    fn user_msg(&mut self, user: &User, msg: &Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
+        let mut bms = vec![];
         debug!("Handle message {:?}", msg);
         if let Some(dest) = msg.get_dest() {
-            if dest.starts_with("#") {
+            let targ = if dest.starts_with("#") {
                 debug!("Routing message to channel {}", dest);
+                let targ = BufTarget::Channel(dest.clone());
                 // If dest is a channel, route it to that channel's buffer.
-                let mut chan = self.chans.entry(dest.clone()).or_insert(Buffer::new(&dest.clone()));
-                chan.user_msg(user, msg, nick);
+                let mut chan = self.chans.entry(dest.clone()).or_insert(Buffer::new(targ.clone()));
+                chan.user_msg(user, msg, nick, &mut bms);
+                Some(targ)
             } else if dest == nick {
+                let targ = BufTarget::Private(user.nick.clone());
                 debug!("Routing message to PM buffer {}", user.nick);
                 // If the message was send directly to us, route it to the
                 // sender's direct message buffer.
-                let mut pm = self.pms.entry(user.nick.clone()).or_insert(Buffer::new(&user.nick.clone()));
-                pm.user_msg(user, msg, nick);
+                let mut pm = self.pms.entry(user.nick.clone()).or_insert(Buffer::new(targ.clone()));
+                pm.user_msg(user, msg, nick, &mut bms);
+                Some(targ)
+            } else {
+                None
+            };
+            if let Some(targ) = targ {
+                for msg in bms.into_iter() {
+                    msgs.push(CoreNetMsg::BufMsg(targ.clone(), msg));
+                }
             }
         } else {
             warn!("Got user message with no known destination: {}", msg);
