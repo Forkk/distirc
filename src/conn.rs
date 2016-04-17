@@ -7,15 +7,13 @@ use rotor::void::Void;
 
 use common::conn::{Handler, Action};
 use common::messages::{
-    BufTarget, BufId, NetId,
-    CoreMsg, CoreBufMsg, CoreNetMsg,
+    CoreMsg,
     ClientMsg, ClientNetMsg, ClientBufMsg,
 };
 
 use user::UserState;
 use config::{UserConfig, UserId};
 use network::{IrcNetwork, BufHandle};
-use buffer::Buffer;
 
 
 struct User {
@@ -204,6 +202,10 @@ impl Client {
                 warn!("ListBufs not implemented");
                 Action::ok(self)
             },
+            ClientNetMsg::JoinChan(ref chan) => {
+                net.join_chan(chan);
+                Action::ok(self)
+            },
         }
     }
 
@@ -222,6 +224,10 @@ impl Client {
                 buf.send_privmsg(msg.clone(), &mut |m| {
                     clients.broadcast(&m)
                 });
+                Action::ok(self)
+            },
+            ClientBufMsg::PartChan(ref optmsg) => {
+                buf.part_chan(optmsg);
                 Action::ok(self)
             },
         }

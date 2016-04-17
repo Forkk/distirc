@@ -78,6 +78,13 @@ mod core {
 
         /// Tells the client about a list of buffers within the network.
         Buffers(Vec<BufInfo>),
+
+        /// Tells the client about a new buffer that the client told the core to
+        /// join.
+        ///
+        /// The usual client behavior for this message is to switch to the
+        /// buffer. It is only sent to the client who requested the join.
+        Joined(BufInfo),
     }
 
     /// Messages sent from the core about a specific buffer.
@@ -105,7 +112,7 @@ mod core {
 
 mod client {
     use types::{NetId, BufId};
-    use super::BufTarget; 
+    use super::BufTarget;
     /// Messages sent from the client.
     #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
     pub enum ClientMsg {
@@ -130,6 +137,12 @@ mod client {
 
         /// Requests that the server re-send the buffer list for this network.
         ListBufs,
+
+        /// Requests that the core join the channel with the given name.
+        ///
+        /// If successful, the core will add a buffer with the given channel
+        /// name and send `Joined` to the client that sent the request.
+        JoinChan(String),
     }
 
     /// Messages from the client about a buffer.
@@ -137,6 +150,9 @@ mod client {
     pub enum ClientBufMsg {
         /// Sends a message to the buffer.
         SendMsg(String),
+
+        /// Requests that the core part the channel with the given message.
+        PartChan(Option<String>),
 
         /// Requests that the server send the client `count` many lines of
         /// scrollback starting from the `start`th line from the bottom of the

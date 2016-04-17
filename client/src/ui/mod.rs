@@ -106,7 +106,25 @@ impl TermUi {
                 } else {
                     self.switch_buf((Some("esper".to_owned()), Some(args.to_owned())));
                 }
-            }
+            },
+            "j" | "join" => {
+                let args = args.split(' ').collect::<Vec<_>>();
+                if args.len() == 2 {
+                    self.model.send_join(args[0].to_owned(), args[1].to_owned());
+                } else {
+                    // TODO: Implement error reporting system.
+                    warn!("Usage: /join [network] [channel]");
+                }
+            },
+            "p" | "part" => {
+                let args = args.split(' ').collect::<Vec<_>>();
+                if args.len() >= 2 {
+                    self.model.send_part(args[0].to_owned(), args[1].to_owned(), args[1..].join(" "));
+                } else {
+                    // TODO: Implement error reporting system.
+                    warn!("Usage: /part [network] [channel] [message..]");
+                }
+            },
             _ => { warn!("Unrecognized command: {}", cmd); },
         }
     }
@@ -133,8 +151,8 @@ impl TermUi {
 
     pub fn handle_key(&mut self, key: &Key) {
         match *key {
-            Key::PageUp => self.view.scroll_by(10),
-            Key::PageDown => self.view.scroll_by(-10),
+            Key::PageUp => self.view.scroll_by(-10),
+            Key::PageDown => self.view.scroll_by(10),
             _ => {},
         }
     }

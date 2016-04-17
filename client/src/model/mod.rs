@@ -64,6 +64,16 @@ impl CoreModel {
         self.send_buf(key, ClientBufMsg::SendMsg(msg));
     }
 
+    /// Asks the core to join the given channel
+    pub fn send_join(&mut self, netid: String, chan: String) {
+        self.send_net(&netid, ClientNetMsg::JoinChan(chan));
+    }
+
+    /// Asks the core to part from the given channel
+    pub fn send_part(&mut self, netid: String, chan: String, msg: String) {
+        self.send_buf(&(Some(netid), Some(chan)), ClientBufMsg::PartChan(Some(msg)));
+    }
+
     // /// Requests more logs from the given buffer.
     // pub fn send_log_req(&mut self, key: &BufKey) {
     //     self.send_buf(key, ClientBufMsg::FetchLogs {
@@ -169,6 +179,7 @@ impl CoreModel {
                 self.handle_buf_msg((Some(net), Some(buf)), bmsg),
             CoreNetMsg::BufMsg(BufTarget::Private(buf), bmsg) =>
                 self.handle_buf_msg((Some(net), Some(buf)), bmsg),
+            CoreNetMsg::Joined(_) => unimplemented!(),
         }
     }
 

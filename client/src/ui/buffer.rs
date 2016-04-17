@@ -67,22 +67,19 @@ impl BufferView {
                     self.render_line(y, rb, time, &user, &line);
                 },
                 LineData::Join { ref user } => {
-                    let from = format!("  {0: >1$}", "-->", self.name_col_w);
                     let line = format!("{0} ({1}@{2}) has joined {3}",
                                        user.nick, user.ident, user.host, buf.name());
-                    self.render_line(y, rb, time, &from, &line);
+                    self.render_line(y, rb, time, "-->", &line);
                 },
                 LineData::Part { ref user, ref reason } => {
-                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
                     let line = format!("{0} ({1}@{2}) has left {3} ({4})",
                                        user.nick, user.ident, user.host, buf.name(), reason);
-                    self.render_line(y, rb, time, &from, &line);
+                    self.render_line(y, rb, time, "<--", &line);
                 },
                 LineData::Quit { ref user, ref msg } => {
-                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
                     let line = format!("{0} ({1}@{2}) has quit ({3})",
                                        user.nick, user.ident, user.host, msg);
-                    self.render_line(y, rb, time, &from, &line);
+                    self.render_line(y, rb, time, "<--", &line);
                 },
                 LineData::Kick { ref by, ref user, ref reason } => {
                     let from = format!("  {0: >1$}", "<--", self.name_col_w);
@@ -99,9 +96,11 @@ impl BufferView {
         use super::util::AlignCol::*;
 
         rb.print_cols(y) // style, fgcolor, bgcolor
-            .print_col_w(RB_NORMAL, Default, Default, Right(self.time_col_w), time)
+            .skip(1)
+            .print_col_w(RB_NORMAL, Default, Default, Left(self.time_col_w), time)
             .print_col(RB_NORMAL, Default, Default, " | ")
-            .print_col_w(RB_BOLD, Default, Default, Left(self.name_col_w), from)
+            .print_col_w(RB_BOLD, Default, Default, Right(self.name_col_w), from)
+            .skip(1)
             .print_col(RB_NORMAL, Default, Default, line);
     }
 

@@ -117,7 +117,11 @@ impl IrcNetwork {
                 None
             };
             if let Some(targ) = targ {
-                let mut buf = self.bufs.entry(targ.clone()).or_insert(Buffer::new(targ.clone()));
+                let mut buf = if !self.bufs.contains_key(&targ) {
+                    let buf = Buffer::new(targ.clone());
+                    msgs.push(CoreNetMsg::Buffers(vec![buf.as_info()]));
+                    self.bufs.entry(targ.clone()).or_insert(buf)
+                } else { self.bufs.get_mut(&targ).unwrap() };
                 buf.user_msg(user, msg, nick, &mut |msg| {
                     msgs.push(CoreNetMsg::BufMsg(targ.clone(), msg));
                 });
@@ -143,6 +147,14 @@ impl IrcNetwork {
                 netid: id,
             }
         })
+    }
+
+    pub fn join_chan(&mut self, chan: &str) {
+        // TODO: Tell the client who requested the join that we joined it.
+        if let Some((ref mut irc, _)) = self.conn {
+            irc.send(Command::JOIN(chan.to_owned(), None, None))
+                .expect("Failed to send IRC message");
+        }
     }
 }
 
@@ -201,6 +213,22 @@ impl<'a> BufHandle<'a> {
             }, &mut |m| {
                 send(CoreMsg::NetMsg(netid.clone(), CoreNetMsg::BufMsg(targ.clone(), m)));
             });
+        }
+    }
+
+    pub fn part_chan(&mut self, msg: &Option<String>) {
+        let dest = match *self.buf.id() {
+            BufTarget::Channel(ref dest) => dest,
+            BufTarget::Private(ref dest) => dest,
+            BufTarget::Network => {
+                warn!("Ignored part command for net buffer");
+                return;
+            },
+        };
+        // TODO: Tell the client who requested the join that we joined it.
+        if let Some(ref mut irc) = self.irc {
+            irc.send(Command::PART(dest.clone(), msg.clone()))
+                .expect("Failed to send IRC message");
         }
     }
 }
