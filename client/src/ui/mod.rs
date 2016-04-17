@@ -116,6 +116,7 @@ impl TermUi {
     pub fn switch_buf(&mut self, key: BufKey) {
         if let Some(ref mut buf) = self.model.get(&key) {
             info!("Switched buffer to {:?}", key);
+            self.key = key;
             self.view = BufferView::new(buf.clone());
         } else {
             error!("No such buffer: {:?}", key);

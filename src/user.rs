@@ -8,7 +8,7 @@ use std::collections::hash_map;
 use irc::client::prelude::*;
 use rotor::Notifier;
 
-use common::messages::CoreMsg;
+use common::messages::{CoreMsg, ClientMsg};
 use common::types::NetId;
 
 use network::IrcNetwork;
@@ -60,6 +60,10 @@ impl UserState {
 
     pub fn get_network(&self, id: &NetId) -> Option<&IrcNetwork> {
         self.networks.get(id)
+    }
+
+    pub fn get_network_mut(&mut self, id: &NetId) -> Option<&mut IrcNetwork> {
+        self.networks.get_mut(id)
     }
 }
 

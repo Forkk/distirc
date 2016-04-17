@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 use std::cell::RefCell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use common::messages::{
     BufTarget, BufId, NetId,
     CoreMsg, CoreBufMsg, CoreNetMsg,
@@ -26,7 +26,6 @@ pub struct CoreModel {
     // network's status buffer.
     bufs: HashMap<BufKey, (Rc<RefCell<Buffer>>, Option<BufSender>)>,
     conn: ConnThread,
-    sendq: VecDeque<ClientMsg>,
 }
 
 impl CoreModel {
@@ -38,7 +37,6 @@ impl CoreModel {
         CoreModel {
             bufs: bufs,
             conn: conn,
-            sendq: VecDeque::new(),
         }
     }
 
@@ -76,6 +74,7 @@ impl CoreModel {
 
     /// Sends a message to the buffer specified by the given key.
     fn send_buf(&mut self, key: &BufKey, msg: ClientBufMsg) {
+        trace!("Sending to buffer {:?} message: {:?}", key, msg);
         match key {
             &(None, None) => {
                 error!("Attempted to send message to system buffer");
@@ -99,12 +98,13 @@ impl CoreModel {
 
 
     fn send_net(&mut self, net: &NetId, msg: ClientNetMsg) {
+        trace!("Sending to network {} message: {:?}", net, msg);
         self.send(ClientMsg::NetMsg(net.clone(), msg));
     }
 
     /// Sends a client message.
     fn send(&mut self, msg: ClientMsg) {
-        self.sendq.push_back(msg);
+        self.conn.send(msg)
     }
 
 

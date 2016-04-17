@@ -25,7 +25,7 @@ use self::model::{Buffer, BufSender};
 fn main() {
     // env_logger::init().expect("Failed to initialize logger");
     let (buf, bs) = Buffer::new("*status*".to_owned());
-    ClientLogger::init(bs, LogLevelFilter::Debug);
+    ClientLogger::init(bs, LogLevelFilter::Trace);
     info!("Hello! Welcome to distirc's terminal client.");
 
     let addr = "127.0.0.1:4242".parse::<SocketAddr>().unwrap();
@@ -59,7 +59,11 @@ impl ClientLogger {
 
 impl Log for ClientLogger {
     fn enabled(&self, meta: &LogMetadata) -> bool {
-        meta.level() <= self.filter.get()
+        meta.level() <= self.filter.get() &&
+            (meta.target().starts_with("distirc")
+             || meta.target().starts_with("client")
+             || meta.target().starts_with("common")
+            )
     }
 
     fn log(&self, log: &LogRecord) {

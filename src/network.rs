@@ -1,13 +1,14 @@
 use std::io;
 use std::thread;
+use std::ops::{Deref, DerefMut};
 use std::sync::mpsc::{channel, Receiver};
 use std::collections::HashMap;
 use irc::client::prelude::*;
 use rotor::Notifier;
 
 use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
-use common::line::{Sender, User};
-use common::types::{NetId, BufId};
+use common::line::{Sender, User, LineData, MsgKind};
+use common::types::NetId;
 
 use config::IrcNetConfig;
 use buffer::Buffer;
@@ -19,8 +20,7 @@ pub struct IrcNetwork {
     cfg: IrcNetConfig,
     conn: Option<(IrcServer, Receiver<Message>)>,
     // serv_buf: Buffer,
-    chans: HashMap<BufId, Buffer>,
-    pms: HashMap<BufId, Buffer>,
+    bufs: HashMap<BufTarget, Buffer>,
 }
 
 impl IrcNetwork {
@@ -30,8 +30,7 @@ impl IrcNetwork {
             cfg: cfg.clone(),
             conn: None,
             // serv_buf: Buffer::new("server"),
-            chans: HashMap::new(),
-            pms: HashMap::new(),
+            bufs: HashMap::new(),
         }
     }
 
@@ -103,52 +102,118 @@ impl IrcNetwork {
     }
 
     fn user_msg(&mut self, user: &User, msg: &Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
-        let mut bms = vec![];
         debug!("Handle message {:?}", msg);
         if let Some(dest) = msg.get_dest() {
             let targ = if dest.starts_with("#") {
-                debug!("Routing message to channel {}", dest);
-                let targ = BufTarget::Channel(dest.clone());
                 // If dest is a channel, route it to that channel's buffer.
-                let mut chan = self.chans.entry(dest.clone()).or_insert(Buffer::new(targ.clone()));
-                chan.user_msg(user, msg, nick, &mut bms);
-                Some(targ)
+                debug!("Routing message to channel {}", dest);
+                Some(BufTarget::Channel(dest.clone()))
             } else if dest == nick {
-                let targ = BufTarget::Private(user.nick.clone());
-                debug!("Routing message to PM buffer {}", user.nick);
                 // If the message was send directly to us, route it to the
                 // sender's direct message buffer.
-                let mut pm = self.pms.entry(user.nick.clone()).or_insert(Buffer::new(targ.clone()));
-                pm.user_msg(user, msg, nick, &mut bms);
-                Some(targ)
+                debug!("Routing message to PM buffer {}", user.nick);
+                Some(BufTarget::Private(user.nick.clone()))
             } else {
                 None
             };
             if let Some(targ) = targ {
-                for msg in bms.into_iter() {
+                let mut buf = self.bufs.entry(targ.clone()).or_insert(Buffer::new(targ.clone()));
+                buf.user_msg(user, msg, nick, &mut |msg| {
                     msgs.push(CoreNetMsg::BufMsg(targ.clone(), msg));
-                }
+                });
             }
         } else {
             warn!("Got user message with no known destination: {}", msg);
         }
     }
-}
 
+    pub fn get_buf(&self, targ: &BufTarget) -> Option<&Buffer> {
+        self.bufs.get(targ)
+    }
+
+    pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<BufHandle<'a>> {
+        let id = self.name.clone();
+        let irc = if let Some((ref mut irc, _)) = self.conn {
+            Some(irc)
+        } else { None };
+        self.bufs.get_mut(targ).map(|buf| {
+            BufHandle {
+                irc: irc,
+                buf: buf,
+                netid: id,
+            }
+        })
+    }
+}
 
 // Message data
 impl IrcNetwork {
     /// Gets `NetInfo` data for this buffer.
     pub fn to_info(&self) -> NetInfo {
         let mut bufs = vec![];
-        for (_id, buf) in self.chans.iter() { bufs.push(buf.as_info()); }
-        for (_id, buf) in self.pms.iter() { bufs.push(buf.as_info()); }
+        for (_id, buf) in self.bufs.iter() { bufs.push(buf.as_info()); }
         NetInfo {
             name: self.name.clone(),
             buffers: bufs,
         }
     }
 }
+
+
+/// A reference to a `Buffer` returned by `IrcNetwork::get_buf_mut`.
+///
+/// This is a struct which derefs to `Buffer` to provide access to the buffer,
+/// and also provides additional functions for sending messages to the IRC
+/// server.
+pub struct BufHandle<'a> {
+    netid: NetId,
+    buf: &'a mut Buffer,
+    irc: Option<&'a mut IrcServer>,
+}
+
+impl<'a> BufHandle<'a> {
+    /// Sends a PRIVMSG to this buffer's target.
+    pub fn send_privmsg<S>(&mut self, msg: String, send: &mut S)
+        where S: FnMut(CoreMsg)
+    {
+        let netid = self.netid.clone();
+        if let Some(ref mut irc) = self.irc {
+            let targ = self.buf.id().clone();
+            let dest = match targ {
+                BufTarget::Channel(ref dest) => dest,
+                BufTarget::Private(ref dest) => dest,
+                BufTarget::Network => {
+                    warn!("Can't send PRIVMSG to network");
+                    // FIXME: What should this do?
+                    return;
+                },
+            };
+            let ircmsg = Message {
+                tags: None,
+                prefix: None,
+                command: Command::PRIVMSG(dest.clone(), msg.clone()),
+            };
+            irc.send(ircmsg).expect("Failed to send message to IRC server");
+            self.buf.push_line(LineData::Message {
+                kind: MsgKind::PrivMsg,
+                from: irc.current_nickname().to_owned(),
+                msg: msg,
+            }, &mut |m| {
+                send(CoreMsg::NetMsg(netid.clone(), CoreNetMsg::BufMsg(targ.clone(), m)));
+            });
+        }
+    }
+}
+
+impl<'a> Deref for BufHandle<'a> {
+    type Target = Buffer;
+    fn deref(&self) -> &Self::Target { self.buf }
+}
+impl<'a> DerefMut for BufHandle<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target { self.buf }
+}
+
+
 
 /// Extension to `Message` and `Command` for querying a message's destination.
 pub trait DestBufferExt {

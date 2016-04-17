@@ -21,10 +21,10 @@ pub mod config;
 pub mod user;
 pub mod network;
 pub mod buffer;
-pub mod core;
+pub mod conn;
 
 use self::config::{UserConfig, IrcNetConfig};
-use self::core::{Client, Context, Updater};
+use self::conn::{Client, Context, Updater};
 // use self::user::{UserThread};
 
 rotor_compose!{

@@ -28,7 +28,17 @@ impl Buffer {
     }
 
 
-    pub fn push_line(&mut self, data: LineData, msgs: &mut Vec<CoreBufMsg>) {
+    /// Gets the buffer's identifier.
+    pub fn id(&self) -> &BufTarget {
+        &self.id
+    }
+
+
+    /// Pushes a message into the buffer and posts a `NewLines` message to the
+    /// given message buffer.
+    pub fn push_line<S>(&mut self, data: LineData, send: &mut S)
+        where S: FnMut(CoreBufMsg)
+    {
         let line = BufferLine {
             id: self.line_id,
             // time: now(),
@@ -38,7 +48,7 @@ impl Buffer {
         self.line_id += 1;
         self.lines.push_front(line.clone());
 
-        msgs.push(CoreBufMsg::NewLines(vec![line]));
+        send(CoreBufMsg::NewLines(vec![line]));
     }
 
 
@@ -47,14 +57,16 @@ impl Buffer {
     }
 
 
-    pub fn user_msg(&mut self, user: &User, msg: &Message, nick: &str, msgs: &mut Vec<CoreBufMsg>) {
+    pub fn user_msg<S>(&mut self, user: &User, msg: &Message, nick: &str, send: &mut S)
+        where S: FnMut(CoreBufMsg)
+    {
         match msg.command {
             Command::JOIN(_, _, _) => {
                 if user.nick == nick {
                     info!("Joined channel {}", self.id.name());
                     self.joined = true;
                 }
-                self.push_line(LineData::Join { user: user.clone() }, msgs)
+                self.push_line(LineData::Join { user: user.clone() }, send)
             }
             Command::PART(_, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
@@ -65,7 +77,7 @@ impl Buffer {
                 self.push_line(LineData::Part {
                     user: user.clone(),
                     reason: reason,
-                }, msgs)
+                }, send)
             }
             Command::KICK(_, ref target, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
@@ -77,33 +89,32 @@ impl Buffer {
                     by: user.clone(),
                     user: target.clone(),
                     reason: reason,
-                }, msgs)
-            },
+                }, send)
+            }
             Command::PRIVMSG(_, ref msg) => {
                 self.push_line(LineData::Message {
                     kind: MsgKind::PrivMsg,
                     from: user.nick.clone(),
                     msg: msg.clone(),
-                }, msgs)
-            },
+                }, send)
+            }
             Command::NOTICE(_, ref msg) => {
                 self.push_line(LineData::Message {
                     kind: MsgKind::Notice,
                     from: user.nick.clone(),
                     msg: msg.clone(),
-                }, msgs)
-            },
-            _ => {},
+                }, send)
+            }
+            _ => {}
         }
     }
 }
+
 
 // Message data
 impl Buffer {
     /// Gets `BufInfo` data for this buffer.
     pub fn as_info(&self) -> BufInfo {
-        BufInfo {
-            name: self.id.name().to_owned(),
-        }
+        BufInfo { name: self.id.name().to_owned() }
     }
 }

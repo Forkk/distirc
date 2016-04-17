@@ -21,7 +21,7 @@ pub struct BufInfo {
 
 
 /// Identifies a buffer.
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, RustcEncodable, RustcDecodable)]
 pub enum BufTarget {
     /// An IRC channel buffer
     Channel(BufId),
@@ -105,8 +105,7 @@ mod core {
 
 mod client {
     use types::{NetId, BufId};
-    use super::BufTarget;
-
+    use super::BufTarget; 
     /// Messages sent from the client.
     #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
     pub enum ClientMsg {
