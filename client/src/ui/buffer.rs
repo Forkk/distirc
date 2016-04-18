@@ -32,7 +32,7 @@ impl BufferView {
             buf: buf,
             scroll: None,
             time_col_w: 8,
-            name_col_w: 10,
+            name_col_w: 16,
         }
     }
 

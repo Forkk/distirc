@@ -9,8 +9,7 @@ extern crate time;
 extern crate common;
 
 use std::collections::HashMap;
-use rotor::{Machine, Response, Scope, EventSet, Loop, Config as LoopCfg};
-use rotor::void::Void;
+use rotor::{Machine, Response, Loop, Config as LoopCfg};
 use rotor::mio::tcp::TcpListener;
 use rotor_stream::Accept;
 use irc::client::prelude::Config as IrcConfig;
@@ -63,7 +62,7 @@ fn main() {
     loop_creator.add_machine_with(|scope| {
         notif = Some(scope.notifier());
         Response::ok(Updater).wrap(Fsm::Updater)
-    });
+    }).expect("Failed to add updater");
     let notif = notif.expect("Notifier was not set.");
 
     debug!("Creating context.");

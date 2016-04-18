@@ -118,7 +118,7 @@ impl IrcNetwork {
             };
             if let Some(targ) = targ {
                 let mut buf = if !self.bufs.contains_key(&targ) {
-                    let buf = Buffer::new(targ.clone());
+                    let buf = Buffer::new(self.name.clone(), targ.clone());
                     msgs.push(CoreNetMsg::Buffers(vec![buf.as_info()]));
                     self.bufs.entry(targ.clone()).or_insert(buf)
                 } else { self.bufs.get_mut(&targ).unwrap() };

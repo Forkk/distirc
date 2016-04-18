@@ -76,7 +76,7 @@ impl CoreModel {
 
     /// Requests more logs from the given buffer.
     pub fn send_log_req(&mut self, key: &BufKey) {
-        self.send_buf(key, ClientBufMsg::FetchLogs(10));
+        self.send_buf(key, ClientBufMsg::FetchLogs(100));
     }
 
 
@@ -91,7 +91,7 @@ impl CoreModel {
             }
         }
         for k in keys {
-            self.send_buf(&k, ClientBufMsg::FetchLogs(10))
+            self.send_log_req(&k)
         }
     }
 

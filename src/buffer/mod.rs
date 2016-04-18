@@ -1,9 +1,13 @@
-use std::collections::VecDeque;
+use std::env;
 use irc::client::prelude::*;
 use time::{Tm, now};
 
 use common::line::{BufferLine, LineData, MsgKind, User};
-use common::messages::{BufInfo, BufTarget, CoreBufMsg};
+use common::messages::{NetId, BufInfo, BufTarget, CoreBufMsg};
+
+mod log;
+
+use self::log::BufferLog;
 
 /// A buffer within a network.
 #[derive(Debug, Clone)]
@@ -16,18 +20,26 @@ pub struct Buffer {
     /// Messages loaded from logs. These have negative indices.
     back: Vec<BufferLine>,
     joined: bool, // users: Vec<String>,
+    log: BufferLog,
 }
 
 // Buffer behavior
 impl Buffer {
-    pub fn new(id: BufTarget) -> Buffer {
+    pub fn new(nid: NetId, id: BufTarget) -> Buffer {
+        let mut path = env::current_dir().expect("Failed to get cwd");
+        path.push("logs");
+        path.push(nid);
+        path.push(id.name());
+        let mut log = BufferLog::new(path);
+
         Buffer {
             id: id,
             line_id: 0,
             topic: String::new(),
             front: vec![],
-            back: vec![],
+            back: log.fetch_lines(),
             joined: false,
+            log: log,
         }
     }
 
@@ -39,9 +51,22 @@ impl Buffer {
 
 
     pub fn get_line(&mut self, idx: isize) -> Option<&BufferLine> {
+        if idx < self.last_idx() {
+            self.back.extend(self.log.fetch_lines());
+        };
         if idx < 0 {
             self.back.get((-idx) as usize - 1)
         } else { self.front.get(idx as usize) }
+    }
+
+
+    pub fn last_idx(&self) -> isize {
+        if self.back.is_empty() {
+            // If the back is empty, the first line in the front buffer is the last index.
+            0
+        } else {
+            -(self.back.len() as isize)
+        }
     }
 
     /// Returns the length of the front buffer. This is the index of the most
@@ -70,6 +95,7 @@ impl Buffer {
         trace!("Buffer {}: Pushing line {:?}", self.id.name(), line);
         self.line_id += 1;
         self.front.push(line.clone());
+        self.log.write_lines(vec![line.clone()]);
 
         send(CoreBufMsg::NewLines(vec![line]));
     }
@@ -132,7 +158,6 @@ impl Buffer {
         }
     }
 }
-
 
 // Message data
 impl Buffer {
