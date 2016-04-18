@@ -1,9 +1,8 @@
-use std::error::Error;
 use std::thread;
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::net::SocketAddr;
 use rotor::{Scope, Loop, Config as LoopCfg, Notifier};
-use rotor_stream::{Persistent, Stream};
+use rotor_stream::Persistent;
 
 use common::conn::{Action, Handler, Connection};
 use common::messages::{CoreMsg, ClientMsg};

@@ -151,7 +151,7 @@ impl TermUi {
 
     pub fn handle_key(&mut self, key: &Key) {
         match *key {
-            Key::PageUp => self.view.scroll_by(-10),
+            Key::PageUp => self.view.scroll_and_fetch(-10),
             Key::PageDown => self.view.scroll_by(10),
             _ => {},
         }

@@ -14,9 +14,8 @@ pub struct BufferView {
     /// The current buffer.
     pub buf: Rc<RefCell<Buffer>>,
     /// When `None`, the view is scrolled to the bottom of the buffer.
-    /// Otherwise,this is the number of lines we have scrolled up from the
-    /// bottom of the buffer.
-    scroll: Option<isize>,
+    /// Otherwise, this is the index of our current line.
+    pub scroll: Option<isize>,
     /// Number of columns reserved for sender timestamps.
     time_col_w: usize,
     /// Number of columns reserved for sender names.
@@ -45,9 +44,10 @@ impl BufferView {
         debug_assert!(y1 < y2);
         debug_assert!(y1 < rb.height());
         let buf = self.buf.borrow();
+        if buf.is_empty() { return; }
         let mut y = y2;
-        let mut i = self.scroll.unwrap_or(buf.front_len() - 1);
-        while y > 0 && i >= -buf.back_len() {
+        let mut i = self.scroll.unwrap_or(buf.first_idx());
+        while y > y1 && i >= buf.last_idx() {
             let ref line = buf.get(i);
 
             y -= 1;
@@ -105,14 +105,38 @@ impl BufferView {
     }
 
 
+    /// Scrolls by the given number of lines and fetches backlog from the server
+    /// if we've scrolled to the top.
+    pub fn scroll_and_fetch(&mut self, by: isize) {
+        {
+            let mut buf = self.buf.borrow_mut();
+            let start = if buf.is_empty() {
+                0
+            } else {
+                buf.first_idx()
+            };
+            let new = self.scroll.unwrap_or(start) + by;
+            let last = buf.last_idx();
+            if new < last {
+                debug!("Fetching more logs. Last: {}", last);
+                buf.request_logs();
+            }
+        }
+        self.scroll_by(by)
+    }
+
+
     /// Scrolls by the given number of lines. Negative is up.
     pub fn scroll_by(&mut self, by: isize) {
         let buf = self.buf.borrow();
-        let new = self.scroll.unwrap_or(0) + by;
-        if new > buf.front_len() {
+        if buf.is_empty() {
+            self.scroll = None; return;
+        }
+        let new = self.scroll.unwrap_or(buf.first_idx()) + by;
+        if new >= buf.first_idx() {
             self.scroll = None;
-        } else if new < -buf.back_len() {
-            self.scroll = Some(-buf.back_len());
+        } else if new < buf.last_idx() {
+            self.scroll = Some(buf.last_idx());
         } else {
             self.scroll = Some(new);
         }

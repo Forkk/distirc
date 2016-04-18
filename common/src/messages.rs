@@ -16,7 +16,13 @@ pub struct NetInfo {
 /// Short summary data used to tell a client about a buffer.
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct BufInfo {
-    pub name: String,
+    pub id: BufTarget,
+}
+
+impl BufInfo {
+    pub fn name(&self) -> &str {
+        self.id.name()
+    }
 }
 
 
@@ -105,7 +111,7 @@ mod core {
         NewLines(Vec<BufferLine>),
 
         /// Used to send scrollback. These lines should be appended to the top
-        /// of the buffer.
+        /// of the buffer. Lines are sent in order from newest to oldest.
         Scrollback(Vec<BufferLine>),
     }
 }
@@ -154,22 +160,9 @@ mod client {
         /// Requests that the core part the channel with the given message.
         PartChan(Option<String>),
 
-        /// Requests that the server send the client `count` many lines of
-        /// scrollback starting from the `start`th line from the bottom of the
-        /// buffer.
-        ///
-        /// The server may or may not honor the `count` field for various
-        /// reasons. If `count` is too large, the server may ignore it for flood
-        /// protection reasons. It may also be dishonored if there aren't that
-        /// many lines of scrollback.
-        FetchLogs {
-            // NOTE: If, by the time this message is received, more lines have
-            // been appended to the buffer, start will be off by however many
-            // lines have been added, possibly resulting in some lines being
-            // missed. For now, this isn't worth dealing with, but it may be a
-            // good idea to fix it later.
-            start: usize,
-            count: usize,
-        },
+        /// Requests that the core send the client `count` many lines of
+        /// scrollback. The core will keep track of which lines haven't been
+        /// sent, so there's no need to specify.
+        FetchLogs(usize),
     }
 }

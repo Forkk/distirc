@@ -11,7 +11,10 @@ pub struct Buffer {
     id: BufTarget,
     line_id: usize,
     topic: String,
-    lines: VecDeque<BufferLine>,
+    /// Messages received since the core started running.
+    front: Vec<BufferLine>,
+    /// Messages loaded from logs. These have negative indices.
+    back: Vec<BufferLine>,
     joined: bool, // users: Vec<String>,
 }
 
@@ -22,7 +25,8 @@ impl Buffer {
             id: id,
             line_id: 0,
             topic: String::new(),
-            lines: VecDeque::new(),
+            front: vec![],
+            back: vec![],
             joined: false,
         }
     }
@@ -31,6 +35,25 @@ impl Buffer {
     /// Gets the buffer's identifier.
     pub fn id(&self) -> &BufTarget {
         &self.id
+    }
+
+
+    pub fn get_line(&mut self, idx: isize) -> Option<&BufferLine> {
+        if idx < 0 {
+            self.back.get((-idx) as usize - 1)
+        } else { self.front.get(idx as usize) }
+    }
+
+    /// Returns the length of the front buffer. This is the index of the most
+    /// recently received message + 1.
+    pub fn front_len(&self) -> isize {
+        self.front.len() as isize
+    }
+
+    /// Returns the length of the back buffer. This is the negative of the index
+    /// of the oldest message.
+    pub fn back_len(&self) -> isize {
+        self.back.len() as isize
     }
 
 
@@ -46,7 +69,7 @@ impl Buffer {
         };
         trace!("Buffer {}: Pushing line {:?}", self.id.name(), line);
         self.line_id += 1;
-        self.lines.push_front(line.clone());
+        self.front.push(line.clone());
 
         send(CoreBufMsg::NewLines(vec![line]));
     }
@@ -115,6 +138,6 @@ impl Buffer {
 impl Buffer {
     /// Gets `BufInfo` data for this buffer.
     pub fn as_info(&self) -> BufInfo {
-        BufInfo { name: self.id.name().to_owned() }
+        BufInfo { id: self.id.clone() }
     }
 }

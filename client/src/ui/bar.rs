@@ -34,11 +34,20 @@ impl StatusBar for MainBar {
         let buf = ui.view.buf.borrow();
         let buf_name = buf.name();
 
+        // TODO: Right align scroll display
+        let buf_scroll = match ui.view.scroll {
+            Some(line) => format!("{}", line - buf.first_idx()),
+            None => "BOT".to_owned(),
+        };
+
         ui.rb.blank_line(y, RB_NORMAL, Default, Black);
         ui.rb.print_cols(y)
             .skip(1)
             .print_col(RB_NORMAL, White, Black, buf_name)
             .skip(1)
+            .print_col(RB_NORMAL, White, Black, " | ")
+            .skip(1)
+            .print_col(RB_NORMAL, White, Black, &buf_scroll)
             ;
     }
 }

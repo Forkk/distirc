@@ -74,13 +74,26 @@ impl CoreModel {
         self.send_buf(&(Some(netid), Some(chan)), ClientBufMsg::PartChan(Some(msg)));
     }
 
-    // /// Requests more logs from the given buffer.
-    // pub fn send_log_req(&mut self, key: &BufKey) {
-    //     self.send_buf(key, ClientBufMsg::FetchLogs {
-    //         start:
-    //     });
-    // }
+    /// Requests more logs from the given buffer.
+    pub fn send_log_req(&mut self, key: &BufKey) {
+        self.send_buf(key, ClientBufMsg::FetchLogs(10));
+    }
 
+
+    /// Sends log requests for buffers that need it.
+    pub fn send_log_reqs(&mut self) {
+        let mut keys = vec![];
+        for (key, buf) in self.bufs.iter() {
+            let mut buf = buf.0.borrow_mut();
+            if buf.log_req {
+                buf.log_req = false;
+                keys.push(key.clone());
+            }
+        }
+        for k in keys {
+            self.send_buf(&k, ClientBufMsg::FetchLogs(10))
+        }
+    }
 
     /// Sends a message to the buffer specified by the given key.
     fn send_buf(&mut self, key: &BufKey, msg: ClientBufMsg) {
@@ -126,6 +139,7 @@ impl CoreModel {
         for (_, &mut (ref mut buf, _)) in self.bufs.iter_mut() {
             buf.borrow_mut().update()
         }
+        self.send_log_reqs();
     }
 
     fn handle_msg(&mut self, msg: CoreMsg) {
@@ -134,16 +148,16 @@ impl CoreModel {
                 info!("Adding networks: {:?}", nets);
                 for net in nets {
                     for buf in net.buffers {
-                        self.get_or_create((Some(net.name.clone()), Some(buf.name)));
+                        self.get_or_create((Some(net.name.clone()), Some(buf.name().to_owned())));
                     }
                 }
             },
             CoreMsg::GlobalBufs(bufs) => {
                 debug!("New global buffers: {:?}", bufs);
                 for buf in bufs {
-                    let key = (None, Some(buf.name.clone()));
+                    let key = (None, Some(buf.name().to_owned()));
                     if !self.bufs.contains_key(&key) {
-                        let (buf, bs) = Buffer::new(buf.name);
+                        let (buf, bs) = Buffer::new(buf.name().to_owned());
                         let buf = Rc::new(RefCell::new(buf));
                         self.bufs.insert(key, (buf, Some(bs)));
                     }
@@ -166,9 +180,9 @@ impl CoreModel {
             CoreNetMsg::Buffers(bufs) => {
                 debug!("New buffers for network {}: {:?}", net, bufs);
                 for buf in bufs {
-                    let key = (Some(net.clone()), Some(buf.name.clone()));
+                    let key = (Some(net.clone()), Some(buf.name().to_owned()));
                     if !self.bufs.contains_key(&key) {
-                        let (buf, bs) = Buffer::new(buf.name);
+                        let (buf, bs) = Buffer::new(buf.name().to_owned());
                         let buf = Rc::new(RefCell::new(buf));
                         self.bufs.insert(key, (buf, Some(bs)));
                     }
@@ -202,11 +216,13 @@ impl CoreModel {
             },
             CoreBufMsg::NewLines(lines) => {
                 for line in lines {
+                    trace!("Sending line {:?} to front", line);
                     bs.send_front(line);
                 }
             },
             CoreBufMsg::Scrollback(lines) => {
                 for line in lines {
+                    trace!("Sending line {:?} to back", line);
                     bs.send_back(line);
                 }
             },

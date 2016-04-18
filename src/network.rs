@@ -184,6 +184,10 @@ pub struct BufHandle<'a> {
 }
 
 impl<'a> BufHandle<'a> {
+    pub fn netid(&self) -> &NetId {
+        &self.netid
+    }
+
     /// Sends a PRIVMSG to this buffer's target.
     pub fn send_privmsg<S>(&mut self, msg: String, send: &mut S)
         where S: FnMut(CoreMsg)

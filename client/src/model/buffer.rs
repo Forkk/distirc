@@ -1,6 +1,4 @@
-use std::sync::Arc;
 use std::sync::mpsc::{channel, Sender, Receiver};
-use std::sync::atomic::{AtomicBool, Ordering};
 use common::messages::BufferLine;
 
 use time::{Tm, now};
@@ -11,7 +9,6 @@ use time::{Tm, now};
 pub struct BufSender {
     front: Sender<BufferLine>,
     back: Sender<BufferLine>,
-    log_req: Arc<AtomicBool>,
 }
 
 impl BufSender {
@@ -45,7 +42,7 @@ pub struct Buffer {
     back_rx: Receiver<BufferLine>,
     /// When this set to true, the client will ask the server for more backlogs
     /// if applicable.
-    log_req: Arc<AtomicBool>,
+    pub log_req: bool,
     /// Lines added since the buffer was connected.
     front: Vec<BufferLine>,
     /// Scrollback lines in reverse order. The first of these is at index -1.
@@ -57,18 +54,16 @@ impl Buffer {
     pub fn new(name: String) -> (Buffer, BufSender) {
         let (tx1, rx1) = channel();
         let (tx2, rx2) = channel();
-        let log_req = Arc::new(AtomicBool::new(false));
 
         let sender = BufSender {
             front: tx1,
             back: tx2,
-            log_req: log_req.clone(),
         };
         let buf = Buffer {
             name: name,
             front_rx: rx1,
             back_rx: rx2,
-            log_req: log_req,
+            log_req: false,
             front: vec![],
             back: vec![],
         };
@@ -95,6 +90,39 @@ impl Buffer {
         } else { &self.front[idx as usize] }
     }
 
+    /// Gets the first index of any message in the buffer.
+    ///
+    /// # Panics
+    /// Panics if the buffer is empty.
+    pub fn first_idx(&self) -> isize {
+        if self.front.is_empty() {
+            if self.back.is_empty() {
+                // If the back is also empty, panic.
+                panic!("Called first_idx on empty buffer.");
+            } else {
+                // If only the front is empty, the first line in the back buffer
+                // is the first index.
+                -1
+            }
+        } else {
+            self.front.len() as isize - 1
+        }
+    }
+
+    pub fn last_idx(&self) -> isize {
+        if self.back.is_empty() {
+            // If the back is empty, the first line in the front buffer is the last index.
+            0
+        } else {
+            -(self.back.len() as isize)
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.front.is_empty() && self.back.is_empty()
+    }
+
+
     /// Returns the length of the front buffer. This is the index of the most
     /// recently received message + 1.
     pub fn front_len(&self) -> isize {
@@ -109,7 +137,7 @@ impl Buffer {
 
     /// Tells the client to request more backlogs from the server.
     pub fn request_logs(&mut self) {
-        self.log_req.store(true, Ordering::Relaxed);
+        self.log_req = true;
     }
 
     // /// Pushes a status message into the buffer.
