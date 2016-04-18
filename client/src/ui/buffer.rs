@@ -27,9 +27,15 @@ impl BufferView {
     ///
     /// The view maintains ownership over the buffer during its lifetime.
     /// To get the buffer back, call `into_buf`.
-    pub fn new(buf: Rc<RefCell<Buffer>>) -> Self {
+    pub fn new(bh: Rc<RefCell<Buffer>>, rb: &mut RustBox) -> Self {
+        {
+            let mut buf = bh.borrow_mut();
+            if rb.height() > buf.len() {
+                buf.request_logs(rb.height());
+            }
+        }
         BufferView {
-            buf: buf,
+            buf: bh,
             scroll: None,
             time_col_w: 8,
             name_col_w: 16,
@@ -107,7 +113,7 @@ impl BufferView {
 
     /// Scrolls by the given number of lines and fetches backlog from the server
     /// if we've scrolled to the top.
-    pub fn scroll_and_fetch(&mut self, by: isize) {
+    pub fn scroll_and_fetch(&mut self, by: isize, rb: &mut RustBox) {
         {
             let mut buf = self.buf.borrow_mut();
             let start = if buf.is_empty() {
@@ -117,9 +123,9 @@ impl BufferView {
             };
             let new = self.scroll.unwrap_or(start) + by;
             let last = buf.last_idx();
-            if new < last {
+            if new - (rb.height() as isize) < last {
                 debug!("Fetching more logs. Last: {}", last);
-                buf.request_logs();
+                buf.request_logs(50);
             }
         }
         self.scroll_by(by)
@@ -139,6 +145,14 @@ impl BufferView {
             self.scroll = Some(buf.last_idx());
         } else {
             self.scroll = Some(new);
+        }
+    }
+
+    /// Returns the number of lines we've scrolled up from the bottom.
+    pub fn scroll_height(&self) -> usize {
+        match self.scroll {
+            Some(line) => (-line - self.buf.borrow().first_idx()) as usize,
+            None => 0,
         }
     }
 }

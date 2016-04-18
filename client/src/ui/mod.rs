@@ -26,7 +26,7 @@ pub struct TermUi {
 
 impl TermUi {
     pub fn new(status: Buffer, conn: ConnThread) -> Result<TermUi, rustbox::InitError> {
-        let rb = try!(RustBox::init(rustbox::InitOptions {
+        let mut rb = try!(RustBox::init(rustbox::InitOptions {
             input_mode: rustbox::InputMode::Current,
             buffer_stderr: true,
         }));
@@ -37,9 +37,9 @@ impl TermUi {
         let buf = model.get(&key).unwrap().clone();
 
         Ok(TermUi {
+            view: BufferView::new(buf, &mut rb),
             rb: rb,
             entry: TextEntry::new(),
-            view: BufferView::new(buf),
             key: key,
             model: model,
             quit: false,
@@ -135,7 +135,7 @@ impl TermUi {
         if let Some(ref mut buf) = self.model.get(&key) {
             info!("Switched buffer to {:?}", key);
             self.key = key;
-            self.view = BufferView::new(buf.clone());
+            self.view = BufferView::new(buf.clone(), &mut self.rb);
         } else {
             error!("No such buffer: {:?}", key);
         }
@@ -151,7 +151,7 @@ impl TermUi {
 
     pub fn handle_key(&mut self, key: &Key) {
         match *key {
-            Key::PageUp => self.view.scroll_and_fetch(-10),
+            Key::PageUp => self.view.scroll_and_fetch(-10, &mut self.rb),
             Key::PageDown => self.view.scroll_by(10),
             _ => {},
         }

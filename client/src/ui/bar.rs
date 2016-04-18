@@ -35,8 +35,8 @@ impl StatusBar for MainBar {
         let buf_name = buf.name();
 
         // TODO: Right align scroll display
-        let buf_scroll = match ui.view.scroll {
-            Some(line) => format!("{}", line - buf.first_idx()),
+        let buf_scroll = match ui.view.scroll.clone() {
+            Some(line) => format!("{}", ui.view.scroll_height()),
             None => "BOT".to_owned(),
         };
 

@@ -42,7 +42,7 @@ pub struct Buffer {
     back_rx: Receiver<BufferLine>,
     /// When this set to true, the client will ask the server for more backlogs
     /// if applicable.
-    pub log_req: bool,
+    pub log_req: usize,
     /// Lines added since the buffer was connected.
     front: Vec<BufferLine>,
     /// Scrollback lines in reverse order. The first of these is at index -1.
@@ -63,7 +63,7 @@ impl Buffer {
             name: name,
             front_rx: rx1,
             back_rx: rx2,
-            log_req: false,
+            log_req: 0,
             front: vec![],
             back: vec![],
         };
@@ -135,9 +135,14 @@ impl Buffer {
         self.back.len() as isize
     }
 
+    /// Returns the number of lines in the buffer.
+    pub fn len(&self) -> usize {
+        self.front.len() + self.back.len()
+    }
+
     /// Tells the client to request more backlogs from the server.
-    pub fn request_logs(&mut self) {
-        self.log_req = true;
+    pub fn request_logs(&mut self, count: usize) {
+        self.log_req += count;
     }
 
     // /// Pushes a status message into the buffer.
