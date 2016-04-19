@@ -7,7 +7,6 @@ use rustbox::RustBox;
 use common::line::LineData;
 
 use model::Buffer;
-use super::util::RustBoxExt;
 
 #[derive(Debug)]
 pub struct BufferView {
@@ -56,58 +55,77 @@ impl BufferView {
         while y > y1 && i >= buf.last_idx() {
             let ref line = buf.get(i);
 
-            y -= 1;
             i -= 1;
             // let timefmt = line.time.strftime("%H:%M:%S").expect("Failed to format time");
             // let time = format!("{0: >1$}", timefmt, self.time_col_w);
             let time = "TODO";
 
-            match line.data {
+            let dy = match line.data {
                 LineData::Message { kind: ref _k, ref from, ref msg } => {
                     let from = format!("<{}>", from);
-                    self.render_line(y, rb, time, &from, &msg);
+                    self.render_line(y, rb, time, &from, &msg)
                 },
                 LineData::Topic { ref by, ref topic } => {
                     let user = by.clone().unwrap_or("*".to_owned());
                     let line = format!("set topic to: {}", topic);
-                    self.render_line(y, rb, time, &user, &line);
+                    self.render_line(y, rb, time, &user, &line)
                 },
                 LineData::Join { ref user } => {
                     let line = format!("{0} ({1}@{2}) has joined {3}",
                                        user.nick, user.ident, user.host, buf.name());
-                    self.render_line(y, rb, time, "-->", &line);
+                    // let line = format!("{0} has joined {1}",
+                    //                    user.nick, buf.name());
+                    self.render_line(y, rb, time, "-->", &line)
                 },
                 LineData::Part { ref user, ref reason } => {
                     let line = format!("{0} ({1}@{2}) has left {3} ({4})",
                                        user.nick, user.ident, user.host, buf.name(), reason);
-                    self.render_line(y, rb, time, "<--", &line);
+                    // let line = format!("{0} has left {1} ({2})",
+                    //                    user.nick, user.ident, reason);
+                    self.render_line(y, rb, time, "<--", &line)
                 },
                 LineData::Quit { ref user, ref msg } => {
                     let line = format!("{0} ({1}@{2}) has quit ({3})",
                                        user.nick, user.ident, user.host, msg);
-                    self.render_line(y, rb, time, "<--", &line);
+                    // let line = format!("{0} has quit ({1})",
+                    //                    user.nick, msg);
+                    self.render_line(y, rb, time, "<--", &line)
                 },
                 LineData::Kick { ref by, ref user, ref reason } => {
                     let from = format!("  {0: >1$}", "<--", self.name_col_w);
                     let line = format!("{} was kicked by {} ({})", user, by.nick, reason);
-                    self.render_line(y, rb, time, &from, &line);
+                    self.render_line(y, rb, time, &from, &line)
                 },
-            }
+            };
+            if y > dy {
+                y -= dy;
+            } else { break; }
         }
     }
 
-    fn render_line(&self, y: usize, rb: &mut RustBox, time: &str, from: &str, line: &str) {
-        use rustbox::{RB_NORMAL, RB_BOLD};
-        use rustbox::Color::*;
-        use super::util::AlignCol::*;
+    fn render_line(&self, mut y: usize, rb: &mut RustBox, time: &str, from: &str, line: &str) -> usize {
+        use rustbox::RB_BOLD;
+        use super::util::LineBuilder;
 
-        rb.print_cols(y) // style, fgcolor, bgcolor
-            .skip(1)
-            .print_col_w(RB_NORMAL, Default, Default, Left(self.time_col_w), time)
-            .print_col(RB_NORMAL, Default, Default, " | ")
-            .print_col_w(RB_BOLD, Default, Default, Right(self.name_col_w), from)
-            .skip(1)
-            .print_col(RB_NORMAL, Default, Default, line);
+        let mut lb = LineBuilder::new();
+
+        lb.skip(1);
+        lb.add_column(time.to_owned())
+            .pad_right(self.time_col_w);
+        lb.skip(1);
+        lb.add_column(from.to_owned())
+            .style(RB_BOLD)
+            .pad_left(self.name_col_w);
+        lb.skip(1);
+        lb.add_column(line.to_owned())
+            .wrap();
+
+        let h = lb.height(rb);
+        if y > h {
+            y -= h;
+            lb.print(y, rb);
+        }
+        h
     }
 
 

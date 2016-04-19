@@ -6,7 +6,7 @@
 //! displays them on the terminal at the given y index.
 
 use super::TermUi;
-use super::util::RustBoxExt;
+use super::util::{RustBoxExt, LineBuilder};
 
 pub trait StatusBar {
     /// Updates the status bar's state.
@@ -36,18 +36,19 @@ impl StatusBar for MainBar {
 
         // TODO: Right align scroll display
         let buf_scroll = match ui.view.scroll.clone() {
-            Some(line) => format!("{}", ui.view.scroll_height()),
+            Some(_) => format!("{}", ui.view.scroll_height()),
             None => "BOT".to_owned(),
         };
 
         ui.rb.blank_line(y, RB_NORMAL, Default, Black);
-        ui.rb.print_cols(y)
-            .skip(1)
-            .print_col(RB_NORMAL, White, Black, buf_name)
-            .skip(1)
-            .print_col(RB_NORMAL, White, Black, " | ")
-            .skip(1)
-            .print_col(RB_NORMAL, White, Black, &buf_scroll)
-            ;
+
+        let mut lb = LineBuilder::new();
+        lb.skip(1);
+        lb.add_column(buf_name.to_owned()).fgcolor(White).bgcolor(Black);
+        lb.skip(1);
+        lb.add_column(" | ".to_owned());
+        lb.add_column(buf_scroll).fgcolor(White).bgcolor(Black);
+
+        lb.print(y, &mut ui.rb);
     }
 }
