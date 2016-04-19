@@ -44,7 +44,7 @@ pub enum LineData {
     },
     Quit {
         user: User,
-        msg: String,
+        msg: Option<String>,
     },
 }
 

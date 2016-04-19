@@ -50,10 +50,6 @@ impl IrcNetwork {
                 }
             }
         });
-        // for chan in self.cfg.cfg.channels() {
-        //     info!("Adding initial channel: {}", chan);
-        //     self.chans.insert(chan.to_owned(), Buffer::new());
-        // }
         info!("Sending identification");
         try!(c.identify());
         self.conn = Some((c, rx));
@@ -94,15 +90,22 @@ impl IrcNetwork {
 
     pub fn handle_msg(&mut self, msg: Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
         let pfx = msg.prefix.clone().map(|p| Sender::parse_prefix(&p));
+        let mut send = |m| { msgs.push(m); };
         match pfx {
-            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, msgs),
-            Some(Sender::Server(_)) => {}
-            None => {}
+            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, &mut send),
+            Some(Sender::Server(_)) => {
+                self.server_msg(&msg, &mut send);
+            },
+            None => {
+                self.server_msg(&msg, &mut send);
+            },
         }
     }
 
-    fn user_msg(&mut self, user: &User, msg: &Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
-        debug!("Handle message {:?}", msg);
+    fn user_msg<S>(&mut self, user: &User, msg: &Message, nick: &str, send: &mut S)
+        where S: FnMut(CoreNetMsg)
+    {
+        debug!("Handling IRC message {:?}", msg);
         if let Some(dest) = msg.get_dest() {
             let targ = if dest.starts_with("#") {
                 // If dest is a channel, route it to that channel's buffer.
@@ -119,15 +122,58 @@ impl IrcNetwork {
             if let Some(targ) = targ {
                 let mut buf = if !self.bufs.contains_key(&targ) {
                     let buf = Buffer::new(self.name.clone(), targ.clone());
-                    msgs.push(CoreNetMsg::Buffers(vec![buf.as_info()]));
+                    send(CoreNetMsg::Buffers(vec![buf.as_info()]));
                     self.bufs.entry(targ.clone()).or_insert(buf)
                 } else { self.bufs.get_mut(&targ).unwrap() };
+
                 buf.user_msg(user, msg, nick, &mut |msg| {
-                    msgs.push(CoreNetMsg::BufMsg(targ.clone(), msg));
+                    send(CoreNetMsg::BufMsg(targ.clone(), msg));
                 });
             }
         } else {
-            warn!("Got user message with no known destination: {}", msg);
+            match msg.command {
+                Command::QUIT(ref quitmsg) => {
+                    for (targ, ref mut buf) in self.bufs.iter_mut() {
+                        if buf.has_user(&user.nick) {
+                            buf.user_quit(user, quitmsg.clone(), &mut |msg| {
+                                send(CoreNetMsg::BufMsg(targ.clone(), msg));
+                            });
+                        }
+                    }
+                },
+                _ => {
+                    error!("Unhandled IRC user message: {:?}", msg);
+                },
+            }
+        }
+    }
+
+    fn server_msg<S>(&mut self, msg: &Message, _send: &mut S)
+        where S: FnMut(CoreNetMsg)
+    {
+        use irc::client::data::Response::*;
+        match msg.command {
+            Command::Response(RPL_NAMREPLY, ref args, Some(ref body)) => {
+                if args.len() < 3 {
+                    error!("Invalid RPL_NAMREPLY: {:?}", msg.command);
+                    return;
+                }
+                // The channel is the third arg.
+                let ref chan = args[2];
+                if let Some(ref mut buf) = self.get_buf_mut(&BufTarget::Channel(chan.clone())) {
+                    buf.handle_names(body);
+                }
+            },
+            Command::Response(RPL_ENDOFNAMES, ref args, _) => {
+                // The channel is the third arg.
+                let ref chan = args[1];
+                if let Some(ref mut buf) = self.get_buf_mut(&BufTarget::Channel(chan.clone())) {
+                    buf.end_names();
+                }
+            },
+            _ => {
+                warn!("Unhandled message: {:?}", msg.command);
+            },
         }
     }
 

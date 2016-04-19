@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use irc::client::prelude::*;
 use time;
@@ -19,7 +20,10 @@ pub struct Buffer {
     front: Vec<BufferLine>,
     /// Messages loaded from logs. These have negative indices.
     back: Vec<BufferLine>,
-    joined: bool, // users: Vec<String>,
+    joined: bool,
+    /// Nicks of users in this channel.
+    users: HashSet<String>,
+    names_ended: bool,
     log: BufferLog,
 }
 
@@ -39,6 +43,8 @@ impl Buffer {
             front: vec![],
             back: log.fetch_lines(),
             joined: false,
+            users: HashSet::new(),
+            names_ended: true,
             log: log,
         }
     }
@@ -47,6 +53,12 @@ impl Buffer {
     /// Gets the buffer's identifier.
     pub fn id(&self) -> &BufTarget {
         &self.id
+    }
+
+
+    /// True if a user with the given nick is present in the channel.
+    pub fn has_user(&self, nick: &str) -> bool {
+        self.users.contains(nick)
     }
 
 
@@ -102,22 +114,31 @@ impl Buffer {
     }
 
 
-    pub fn user_msg<S>(&mut self, user: &User, msg: &Message, nick: &str, send: &mut S)
+    pub fn user_msg<S>(&mut self, user: &User, msg: &Message, my_nick: &str, send: &mut S)
         where S: FnMut(CoreBufMsg)
     {
         match msg.command {
             Command::JOIN(_, _, _) => {
-                if user.nick == nick {
+                if user.nick == my_nick {
                     info!("Joined channel {}", self.id.name());
                     self.joined = true;
+                } else {
+                    debug!("User {} joined channel {}", user.nick, self.id.name());
+                    self.users.insert(user.nick.clone());
+                    trace!("Users: {:?}", self.users);
                 }
                 self.push_line(LineData::Join { user: user.clone() }, send)
             }
             Command::PART(_, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
-                if user.nick == nick {
+                if user.nick == my_nick {
                     info!("Parted channel {}", self.id.name());
                     self.joined = false;
+                    self.users.clear();
+                } else {
+                    debug!("User {} left channel {}", user.nick, self.id.name());
+                    self.users.remove(&user.nick);
+                    trace!("Users: {:?}", self.users);
                 }
                 self.push_line(LineData::Part {
                     user: user.clone(),
@@ -126,9 +147,14 @@ impl Buffer {
             }
             Command::KICK(_, ref target, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
-                if target == nick {
+                if target == my_nick {
                     info!("Kicked from channel {} by {:?}", self.id.name(), user);
                     self.joined = false;
+                    self.users.clear();
+                } else {
+                    debug!("User {} kicked from channel {}", user.nick, self.id.name());
+                    self.users.remove(&user.nick);
+                    trace!("Users: {:?}", self.users);
                 }
                 self.push_line(LineData::Kick {
                     by: user.clone(),
@@ -152,6 +178,41 @@ impl Buffer {
             }
             _ => {}
         }
+    }
+
+    pub fn user_quit<S>(&mut self, user: &User, msg: Option<String>, send: &mut S)
+        where S: FnMut(CoreBufMsg)
+    {
+        debug!("User {} quit buffer {}", user.nick, self.id.name());
+        self.users.remove(&user.nick);
+        self.push_line(LineData::Quit {
+            user: user.clone(),
+            msg: msg,
+        }, send);
+        trace!("Users: {:?}", self.users);
+    }
+
+
+    /// Handles a `RPL_NAMREPLY` message.
+    ///
+    /// If this is the first since the last time `end_names` was called, the
+    /// user list will be cleared first.
+    pub fn handle_names(&mut self, body: &str) {
+        for name in body.split(' ') {
+            let name = if name.starts_with("@") || name.starts_with("+") {
+                &name[1..]
+            } else {
+                name
+            };
+            self.users.insert(name.to_owned());
+        }
+        debug!("User list update: {:?}", self.users);
+    }
+
+    /// Called when the name list ends.
+    pub fn end_names(&mut self) {
+        debug!("Final user list: {:?}", self.users);
+        self.names_ended = true;
     }
 }
 

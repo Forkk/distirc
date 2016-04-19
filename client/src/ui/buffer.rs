@@ -85,6 +85,7 @@ impl BufferView {
                     self.render_line(y, rb, &time, "<--", &line)
                 },
                 LineData::Quit { ref user, ref msg } => {
+                    let msg = msg.clone().unwrap_or("No message".to_owned());
                     let line = format!("{0} ({1}@{2}) has quit ({3})",
                                        user.nick, user.ident, user.host, msg);
                     // let line = format!("{0} has quit ({1})",
