@@ -8,7 +8,6 @@ extern crate time;
 extern crate common;
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::net::SocketAddr;
 use log::{Log, LogLevelFilter, LogRecord, LogMetadata, MaxLogLevelFilter};
 
@@ -39,7 +38,6 @@ fn main() {
 /// A logger that writes to a buffer handle.
 struct ClientLogger {
     bs: Mutex<BufSender>,
-    id: AtomicUsize,
     filter: MaxLogLevelFilter,
 }
 
@@ -49,7 +47,6 @@ impl ClientLogger {
             filter.set(level);
             let l = ClientLogger {
                 bs: Mutex::new(bs),
-                id: AtomicUsize::new(0),
                 filter: filter,
             };
             Box::new(l) as Box<Log>
@@ -79,10 +76,7 @@ impl Log for ClientLogger {
                 kind: MsgKind::Status,
             };
 
-            let line = BufferLine {
-                id: self.id.fetch_add(1, Ordering::Relaxed),
-                data: data,
-            };
+            let line = BufferLine::new(time::now(), data);
 
             let mut bs = self.bs.lock().expect("Failed to lock log destination mutex");
             bs.send_front(line);

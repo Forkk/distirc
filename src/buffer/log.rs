@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::io::{Read, Write};
 use std::fs::{File, OpenOptions, DirBuilder};
 use time::{Tm, Duration, now};
-use rustc_serialize::json::{decode, encode};
 
 use common::line::BufferLine;
 
@@ -34,7 +33,8 @@ impl BufferLog {
             Err(e) => error!("Error opening log file for writing: {}", e),
             Ok(mut f) => {
                 for line in lines {
-                    let mut data = encode(&line).unwrap();
+                    use serde_json::ser;
+                    let mut data = ser::to_string(&line).unwrap();
                     data.push('\n');
                     f.write_all(data.as_bytes()).expect("Failed writing to log file");
                 }
@@ -55,7 +55,14 @@ impl BufferLog {
             }
 
             let lines = data.lines().flat_map(|l| {
-                decode(l).ok()
+                use serde_json::de;
+                match de::from_str(l) {
+                    Ok(l) => Some(l),
+                    Err(e) => {
+                        warn!("Error parsing log line: {}", e);
+                        None
+                    }
+                }
             }).rev().collect();
             lines
         } else {

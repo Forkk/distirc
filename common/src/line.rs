@@ -1,66 +1,9 @@
 // use irc::client::prelude::*;
+use time;
+use time::{Tm, Timespec};
+use serde::{Serializer, Deserializer};
 
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub struct BufferLine {
-    pub id: usize,
-    // time: Tm,
-    pub data: LineData,
-}
-
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub enum LineData {
-    Message {
-        kind: MsgKind,
-        from: String,
-        msg: String,
-    },
-    Topic {
-        by: Option<String>,
-        topic: String
-    },
-    Join {
-        user: User,
-    },
-    Part {
-        user: User,
-        reason: String,
-    },
-    Kick {
-        by: User,
-        user: String,
-        reason: String,
-    },
-    Quit {
-        user: User,
-        msg: String,
-    },
-}
-
-#[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub enum MsgKind {
-    PrivMsg,
-    Notice,
-    // FIXME: The below is not encodable
-    // /// IRC response codes
-    // Response(Response),
-    /// Special status messages
-    Status,
-}
-
-/// Sender of a message
-#[derive(Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
-pub enum Sender {
-    User(User),
-    Server(String),
-}
-
-/// An IRC user sender
-#[derive(Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
-pub struct User {
-    pub nick: String,
-    pub ident: String,
-    pub host: String,
-}
+include!(concat!(env!("OUT_DIR"), "/line.rs"));
 
 impl Sender {
     pub fn parse_prefix(pfx: &str) -> Sender {

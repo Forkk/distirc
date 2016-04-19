@@ -56,45 +56,45 @@ impl BufferView {
             let ref line = buf.get(i);
 
             i -= 1;
-            // let timefmt = line.time.strftime("%H:%M:%S").expect("Failed to format time");
-            // let time = format!("{0: >1$}", timefmt, self.time_col_w);
-            let time = "TODO";
+            let tm = line.time();
+            let timefmt = tm.strftime("%H:%M:%S").expect("Failed to format time");
+            let time = format!("{0: >1$}", timefmt, self.time_col_w);
 
             let dy = match line.data {
                 LineData::Message { kind: ref _k, ref from, ref msg } => {
                     let from = format!("<{}>", from);
-                    self.render_line(y, rb, time, &from, &msg)
+                    self.render_line(y, rb, &time, &from, &msg)
                 },
                 LineData::Topic { ref by, ref topic } => {
                     let user = by.clone().unwrap_or("*".to_owned());
                     let line = format!("set topic to: {}", topic);
-                    self.render_line(y, rb, time, &user, &line)
+                    self.render_line(y, rb, &time, &user, &line)
                 },
                 LineData::Join { ref user } => {
                     let line = format!("{0} ({1}@{2}) has joined {3}",
                                        user.nick, user.ident, user.host, buf.name());
                     // let line = format!("{0} has joined {1}",
                     //                    user.nick, buf.name());
-                    self.render_line(y, rb, time, "-->", &line)
+                    self.render_line(y, rb, &time, "-->", &line)
                 },
                 LineData::Part { ref user, ref reason } => {
                     let line = format!("{0} ({1}@{2}) has left {3} ({4})",
                                        user.nick, user.ident, user.host, buf.name(), reason);
                     // let line = format!("{0} has left {1} ({2})",
                     //                    user.nick, user.ident, reason);
-                    self.render_line(y, rb, time, "<--", &line)
+                    self.render_line(y, rb, &time, "<--", &line)
                 },
                 LineData::Quit { ref user, ref msg } => {
                     let line = format!("{0} ({1}@{2}) has quit ({3})",
                                        user.nick, user.ident, user.host, msg);
                     // let line = format!("{0} has quit ({1})",
                     //                    user.nick, msg);
-                    self.render_line(y, rb, time, "<--", &line)
+                    self.render_line(y, rb, &time, "<--", &line)
                 },
                 LineData::Kick { ref by, ref user, ref reason } => {
                     let from = format!("  {0: >1$}", "<--", self.name_col_w);
                     let line = format!("{} was kicked by {} ({})", user, by.nick, reason);
-                    self.render_line(y, rb, time, &from, &line)
+                    self.render_line(y, rb, &time, &from, &line)
                 },
             };
             if y > dy {

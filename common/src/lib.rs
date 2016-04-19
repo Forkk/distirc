@@ -5,6 +5,7 @@ extern crate irc;
 extern crate bincode;
 extern crate byteorder;
 extern crate rustc_serialize;
+extern crate serde;
 extern crate time;
 
 pub mod types;

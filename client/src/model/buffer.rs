@@ -1,8 +1,6 @@
 use std::sync::mpsc::{channel, Sender, Receiver};
 use common::messages::BufferLine;
 
-use time::{Tm, now};
-
 
 /// Sends lines to a `Buffer` in a thread-safe manner.
 #[derive(Debug)]

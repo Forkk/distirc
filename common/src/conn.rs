@@ -7,9 +7,9 @@ use std::error::Error;
 use rotor::Scope;
 use rotor::mio::tcp::TcpStream;
 use rotor_stream::{Stream, Transport, Protocol, Intent, Exception};
-use rustc_serialize::{Encodable, Decodable};
+use serde::{Serialize, Deserialize};
 use bincode::SizeLimit;
-use bincode::rustc_serialize::{encode_into, encoded_size, decode};
+use bincode::serde::{serialize_into, serialized_size, deserialize};
 use byteorder::{LittleEndian, WriteBytesExt, ReadBytesExt};
 
 
@@ -18,8 +18,8 @@ pub type ConnStream<H> = Stream<Connection<H>>;
 /// Trait for state machines that handle distirc messages.
 pub trait Handler: Sized {
     type Context;
-    type Send: Sized + Encodable;
-    type Recv: Sized + Decodable;
+    type Send: Sized + Serialize;
+    type Recv: Sized + Deserialize;
 
     fn create(scope: &mut Scope<Self::Context>) -> Action<Self>;
 
@@ -141,10 +141,10 @@ impl<H : Handler> Protocol for Connection<H> {
         debug!("Message bytes flushed");
         if let Some(msg) = self.msgq.pop_front() {
             let ref mut out = transport.output();
-            if let Err(e) = out.write_u64::<LittleEndian>(encoded_size(&msg) as u64) {
+            if let Err(e) = out.write_u64::<LittleEndian>(serialized_size(&msg) as u64) {
                 return Intent::error(Box::new(e) as Box<Error>);
             }
-            match encode_into(&msg, out, SizeLimit::Bounded(65535)) {
+            match serialize_into(out, &msg, SizeLimit::Bounded(65535)) {
                 Ok(()) => Intent::of(self).expect_flush(),
                 Err(e) => Intent::error(Box::new(e) as Box<Error>),
             }
@@ -181,7 +181,7 @@ impl<H : Handler> Protocol for Connection<H> {
             ConnState::Reading => {
                 let msg = {
                     let data = &transport.input()[..end];
-                    decode(data)
+                    deserialize(data)
                 };
                 transport.input().consume(end);
                 match msg {

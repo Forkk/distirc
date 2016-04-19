@@ -8,7 +8,7 @@ use std::collections::hash_map;
 use irc::client::prelude::*;
 use rotor::Notifier;
 
-use common::messages::{CoreMsg, ClientMsg};
+use common::messages::CoreMsg;
 use common::types::NetId;
 
 use network::IrcNetwork;

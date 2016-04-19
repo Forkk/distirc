@@ -1,6 +1,6 @@
 use std::env;
 use irc::client::prelude::*;
-use time::{Tm, now};
+use time;
 
 use common::line::{BufferLine, LineData, MsgKind, User};
 use common::messages::{NetId, BufInfo, BufTarget, CoreBufMsg};
@@ -87,11 +87,7 @@ impl Buffer {
     pub fn push_line<S>(&mut self, data: LineData, send: &mut S)
         where S: FnMut(CoreBufMsg)
     {
-        let line = BufferLine {
-            id: self.line_id,
-            // time: now(),
-            data: data,
-        };
+        let line = BufferLine::new(time::now(), data);
         trace!("Buffer {}: Pushing line {:?}", self.id.name(), line);
         self.line_id += 1;
         self.front.push(line.clone());

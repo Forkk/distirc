@@ -198,7 +198,6 @@ impl ColBuilder {
         let mut last_split = 0;
         for (i, ch) in self.text.char_indices() {
             let x = i - last_split;
-            // trace!("x: {}, w: {}, last_spc: {:?}, last_split: {}", x, width, last_spc, last_split);
             // If we've exceeded our width, add a wrap point at the last space.
             if x > width {
                 if let Some(p) = last_spc {
