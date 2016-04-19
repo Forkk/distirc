@@ -7,14 +7,14 @@ extern crate rustc_serialize;
 extern crate serde;
 extern crate serde_json;
 extern crate time;
+extern crate toml;
 
 extern crate common;
 
-use std::collections::HashMap;
+use std::path::Path;
 use rotor::{Machine, Response, Loop, Config as LoopCfg};
 use rotor::mio::tcp::TcpListener;
 use rotor_stream::Accept;
-use irc::client::prelude::Config as IrcConfig;
 
 use common::conn::ConnStream;
 
@@ -24,9 +24,8 @@ pub mod network;
 pub mod buffer;
 pub mod conn;
 
-use self::config::{UserConfig, IrcNetConfig};
+use self::config::read_config;
 use self::conn::{Client, Context, Updater};
-// use self::user::{UserThread};
 
 rotor_compose!{
     pub enum Fsm/Seed<Context> {
@@ -38,19 +37,9 @@ rotor_compose!{
 fn main() {
     env_logger::init().expect("Failed to initialize logger");
 
-    let mut cfg = UserConfig {
-        name: "test".to_owned(),
-        networks: HashMap::new(),
-    };
-    cfg.networks.insert("esper".to_owned(), IrcNetConfig {
-        name: "esper".to_owned(),
-        cfg: IrcConfig {
-            nickname: Some("cctest".to_owned()),
-            server: Some("irc.esper.net".to_owned()),
-            channels: Some(vec!["#Forkk13".to_owned()]),
-            .. IrcConfig::default()
-        }
-    });
+    let cfg_path = Path::new("config.toml");
+    let cfg = read_config(cfg_path);
+
     debug!("Created test config.");
 
     debug!("Creating loop.");
@@ -69,7 +58,9 @@ fn main() {
 
     debug!("Creating context.");
     let mut ctx = Context::new(notif);
-    ctx.add_user("Forkk", cfg);
+    for (uid, ucfg) in cfg.users.iter() {
+        ctx.add_user(uid, ucfg.clone());
+    }
 
     debug!("Initializing context.");
     ctx.init();

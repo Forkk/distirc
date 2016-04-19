@@ -24,9 +24,9 @@ pub struct IrcNetwork {
 }
 
 impl IrcNetwork {
-    pub fn new(cfg: &IrcNetConfig) -> IrcNetwork {
+    pub fn new(name: &str, cfg: &IrcNetConfig) -> IrcNetwork {
         IrcNetwork {
-            name: cfg.name.clone(),
+            name: name.to_owned(),
             cfg: cfg.clone(),
             conn: None,
             // serv_buf: Buffer::new("server"),
@@ -37,7 +37,7 @@ impl IrcNetwork {
     /// Attempts to connect to the IRC network.
     pub fn connect(&mut self, notif: Notifier) -> io::Result<()> {
         info!("Connecting to IRC network");
-        let c = try!(IrcServer::from_config(self.cfg.cfg.clone()));
+        let c = try!(IrcServer::from_config(self.cfg.irc.clone()));
         let (tx, rx) = channel();
         let c2 = c.clone();
         thread::spawn(move || {

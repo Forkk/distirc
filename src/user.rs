@@ -31,14 +31,14 @@ impl UserState {
 
     pub fn from_cfg(wake: Notifier, cfg: UserConfig) -> UserState {
         let mut us = Self::new(wake);
-        for (name, net_cfg) in cfg.networks.iter() {
+        for (name, net_cfg) in cfg.nets.iter() {
             us.add_server(&name, net_cfg);
         }
         us
     }
 
     fn add_server(&mut self, name: &str, cfg: &IrcNetConfig) {
-        self.networks.insert(name.to_owned(), IrcNetwork::new(cfg));
+        self.networks.insert(name.to_owned(), IrcNetwork::new(name, cfg));
     }
 
     pub fn init(&mut self) {

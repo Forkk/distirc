@@ -103,7 +103,7 @@ impl Handler for Client {
     fn create(s: &mut Scope<Self::Context>) -> Action<Self> {
         let (tx, rx) = channel();
 
-        let uid = "Forkk";
+        let uid = "forkk";
         let me = Client::Connected{
             uid: uid.to_owned(),
             rx: rx,
