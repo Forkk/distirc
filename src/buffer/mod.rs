@@ -166,6 +166,7 @@ impl Buffer {
                 self.push_line(LineData::Message {
                     kind: MsgKind::PrivMsg,
                     from: user.nick.clone(),
+                    ping: msg.contains(my_nick),
                     msg: msg.clone(),
                 }, send)
             }
@@ -173,6 +174,7 @@ impl Buffer {
                 self.push_line(LineData::Message {
                     kind: MsgKind::Notice,
                     from: user.nick.clone(),
+                    ping: false,
                     msg: msg.clone(),
                 }, send)
             }

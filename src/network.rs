@@ -260,6 +260,7 @@ impl<'a> BufHandle<'a> {
                 kind: MsgKind::PrivMsg,
                 from: irc.current_nickname().to_owned(),
                 msg: msg,
+                ping: false,
             }, &mut |m| {
                 send(CoreMsg::NetMsg(netid.clone(), CoreNetMsg::BufMsg(targ.clone(), m)));
             });

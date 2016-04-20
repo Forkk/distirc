@@ -61,7 +61,7 @@ impl BufferView {
             let time = format!("{0: >1$}", timefmt, self.time_col_w);
 
             let dy = match line.data {
-                LineData::Message { kind: ref _k, ref from, ref msg } => {
+                LineData::Message { kind: ref _k, ref from, ref msg, .. } => {
                     let from = format!("<{}>", from);
                     self.render_line(y, rb, &time, &from, &msg)
                 },

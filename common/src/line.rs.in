@@ -16,6 +16,21 @@ impl BufferLine {
     pub fn time(&self) -> Tm {
         time::at(Timespec::new(self.time, 0))
     }
+
+    /// True if this line pinged the user.
+    pub fn has_ping(&self) -> bool {
+        if let LineData::Message { ping, .. } = self.data {
+            ping
+        } else { false }
+    }
+}
+
+fn is_false(v: &bool) -> bool {
+    !v
+}
+
+fn const_false() -> bool {
+    false
 }
 
 
@@ -25,6 +40,10 @@ pub enum LineData {
         kind: MsgKind,
         from: String,
         msg: String,
+        /// True if this message is marked as including a mention of the user's
+        /// nick. This results in the client alerting the user to the message.
+        #[serde(default="const_false")]
+        ping: bool,
     },
     Topic {
         by: Option<String>,

@@ -24,8 +24,10 @@ pub struct CoreModel {
     // In the keys here, when the `NetId` is `None`, the value is a global
     // buffer. When the `BufId` is none and the `NetId` isn't, the buffer is the
     // network's status buffer.
-    bufs: HashMap<BufKey, (Rc<RefCell<Buffer>>, Option<BufSender>)>,
+    pub bufs: HashMap<BufKey, (Rc<RefCell<Buffer>>, Option<BufSender>)>,
     conn: ConnThread,
+    // List of new buffers with pings.
+    pings: Vec<BufKey>,
 }
 
 impl CoreModel {
@@ -37,6 +39,7 @@ impl CoreModel {
         CoreModel {
             bufs: bufs,
             conn: conn,
+            pings: vec![],
         }
     }
 
@@ -56,6 +59,16 @@ impl CoreModel {
         debug!("Created client buffer {:?}", &key);
         self.bufs.insert(key, (buf.clone(), Some(bs)));
         buf
+    }
+
+
+    /// Returns a vector of buffers that the user has been mentioned in since
+    /// the last time it was called.
+    pub fn take_pings(&mut self) -> Vec<BufKey> {
+        use std::mem;
+        let mut pings = vec![];
+        mem::swap(&mut pings, &mut self.pings);
+        pings
     }
 
 
@@ -136,8 +149,13 @@ impl CoreModel {
         while let Some(msg) = self.conn.recv() {
             self.handle_msg(msg);
         }
-        for (_, &mut (ref mut buf, _)) in self.bufs.iter_mut() {
-            buf.borrow_mut().update()
+        for (key, &mut (ref mut buf, _)) in self.bufs.iter_mut() {
+            let mut ping = false;
+            buf.borrow_mut().update(&mut ping);
+            if ping {
+                debug!("Pushing ping for {:?}", &key);
+                self.pings.push(key.clone());
+            }
         }
         self.send_log_reqs();
     }
@@ -206,6 +224,7 @@ impl CoreModel {
             },
         };
 
+        let key2 = key.clone();
         match msg {
             CoreBufMsg::State { joined } => {
                 if joined {
@@ -227,6 +246,12 @@ impl CoreModel {
                 }
             },
         }
-        buf.borrow_mut().update();
+
+        let mut ping = false;
+        buf.borrow_mut().update(&mut ping);
+        if ping {
+            debug!("Pushing ping for {:?}", &key2);
+            self.pings.push(key2);
+        }
     }
 }
