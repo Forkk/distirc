@@ -6,7 +6,6 @@
 //! displays them on the terminal at the given y index.
 
 use std::cmp;
-use rustbox::RustBox;
 
 use super::TermUi;
 use super::util::{RustBoxExt, LineBuilder};
