@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use common::messages::{
-    BufTarget, BufId, NetId,
+    BufTarget, NetId, BufInfo,
     CoreMsg, CoreBufMsg, CoreNetMsg,
     ClientMsg, ClientNetMsg, ClientBufMsg,
 };
@@ -14,9 +14,9 @@ use conn::ConnThread;
 
 mod buffer;
 
-pub use self::buffer::{Buffer, BufSender};
+pub use self::buffer::{Buffer, BufSender, BufKey};
 
-pub type BufKey = (Option<NetId>, Option<BufId>);
+// pub type BufKey = (Option<NetId>, Option<BufId>);
 
 /// Handles communication with the core.
 pub struct CoreModel {
@@ -24,29 +24,40 @@ pub struct CoreModel {
     // In the keys here, when the `NetId` is `None`, the value is a global
     // buffer. When the `BufId` is none and the `NetId` isn't, the buffer is the
     // network's status buffer.
-    pub bufs: HashMap<BufKey, (Rc<RefCell<Buffer>>, Option<BufSender>)>,
+    pub bufs: HashMap<BufKey, BufEntry>,
     conn: ConnThread,
     // List of new buffers with pings.
     pings: Vec<BufKey>,
+    status: Option<String>,
+}
+
+/// Type for storing buffers in the model.
+pub struct BufEntry {
+    buf: Rc<RefCell<Buffer>>,
+    sender: Option<BufSender>,
 }
 
 impl CoreModel {
     pub fn new(status: Buffer, conn: ConnThread) -> CoreModel {
         let mut bufs = HashMap::new();
         let status = Rc::new(RefCell::new(status));
-        bufs.insert((None, None), (status.clone(), None));
+        bufs.insert(BufKey::Status, BufEntry {
+            buf: status.clone(),
+            sender: None,
+        });
 
         CoreModel {
             bufs: bufs,
             conn: conn,
             pings: vec![],
+            status: None,
         }
     }
 
 
     /// Gets the given buffer if it exists.
     pub fn get(&self, key: &BufKey) -> Option<&Rc<RefCell<Buffer>>> {
-        self.bufs.get(key).map(|&(ref buf, _)| buf)
+        self.bufs.get(key).map(|&BufEntry { ref buf, .. }| buf)
     }
 
     /// Gets the buffer with the given key. Creates one if it doesn't exist.
@@ -54,11 +65,31 @@ impl CoreModel {
         if let Some(buf) = self.get(&key) {
             return buf.clone();
         }
-        let (buf, bs) = Buffer::new(key.1.clone().unwrap_or("network".to_owned()));
+        let (buf, bs) = Buffer::new(key.clone());
         let buf = Rc::new(RefCell::new(buf));
         debug!("Created client buffer {:?}", &key);
-        self.bufs.insert(key, (buf.clone(), Some(bs)));
+        self.bufs.insert(key, BufEntry {
+            buf: buf.clone(),
+            sender: Some(bs)
+        });
         buf
+    }
+
+    /// Creates a buffer for the given `NetId` and `BufInfo`.
+    fn create_remote_buf(&mut self, nid: NetId, buf: BufInfo) {
+        let key = BufKey::from_targ(nid, buf.id);
+        self.get_or_create(key);
+    }
+
+
+    /// Sets a status message for the UI to show.
+    fn status(&mut self, status: String) {
+        self.status = Some(status);
+    }
+
+    /// Takes a status message if present.
+    pub fn take_status(&mut self) -> Option<String> {
+        self.status.take()
     }
 
 
@@ -84,7 +115,7 @@ impl CoreModel {
 
     /// Asks the core to part from the given channel
     pub fn send_part(&mut self, netid: String, chan: String, msg: String) {
-        self.send_buf(&(Some(netid), Some(chan)), ClientBufMsg::PartChan(Some(msg)));
+        self.send_buf(&BufKey::Channel(netid, chan), ClientBufMsg::PartChan(Some(msg)));
     }
 
     /// Requests more logs from the given buffer.
@@ -96,8 +127,8 @@ impl CoreModel {
     /// Sends log requests for buffers that need it.
     pub fn send_log_reqs(&mut self) {
         let mut keys = vec![];
-        for (key, buf) in self.bufs.iter() {
-            let mut buf = buf.0.borrow_mut();
+        for (key, ent) in self.bufs.iter() {
+            let mut buf = ent.buf.borrow_mut();
             if buf.log_req > 0 {
                 keys.push((key.clone(), buf.log_req));
                 buf.log_req = 0;
@@ -111,23 +142,22 @@ impl CoreModel {
     /// Sends a message to the buffer specified by the given key.
     fn send_buf(&mut self, key: &BufKey, msg: ClientBufMsg) {
         trace!("Sending to buffer {:?} message: {:?}", key, msg);
-        match key {
-            &(None, None) => {
-                error!("Attempted to send message to system buffer");
+        match *key {
+            BufKey::Status => {
+                error!("Attempted to send message to client status buffer");
                 return;
             },
-            &(Some(ref net), None) => {
-                self.send_net(net, ClientNetMsg::BufMsg(BufTarget::Network, msg));
+            BufKey::Network(ref nid) => {
+                self.send_net(nid, ClientNetMsg::BufMsg(BufTarget::Network, msg));
             },
-            &(Some(ref net), Some(ref buf)) => {
-                if buf.starts_with("#") {
-                    self.send_net(net, ClientNetMsg::BufMsg(BufTarget::Channel(buf.clone()), msg));
-                } else {
-                    self.send_net(net, ClientNetMsg::BufMsg(BufTarget::Private(buf.clone()), msg));
-                }
+            BufKey::Channel(ref nid, ref bid) => {
+                self.send_net(nid, ClientNetMsg::BufMsg(BufTarget::Channel(bid.clone()), msg));
             },
-            &(None, Some(ref buf)) => {
-                self.send(ClientMsg::BufMsg(buf.clone(), msg));
+            BufKey::Private(ref nid, ref bid) => {
+                self.send_net(nid, ClientNetMsg::BufMsg(BufTarget::Private(bid.clone()), msg));
+            },
+            BufKey::Global(ref bid) => {
+                self.send(ClientMsg::BufMsg(bid.clone(), msg));
             },
         }
     }
@@ -149,7 +179,7 @@ impl CoreModel {
         while let Some(msg) = self.conn.recv() {
             self.handle_msg(msg);
         }
-        for (key, &mut (ref mut buf, _)) in self.bufs.iter_mut() {
+        for (key, &mut BufEntry { ref mut buf, .. }) in self.bufs.iter_mut() {
             let mut ping = false;
             buf.borrow_mut().update(&mut ping);
             if ping {
@@ -166,58 +196,45 @@ impl CoreModel {
                 info!("Adding networks: {:?}", nets);
                 for net in nets {
                     for buf in net.buffers {
-                        self.get_or_create((Some(net.name.clone()), Some(buf.name().to_owned())));
+                        self.create_remote_buf(net.name.clone(), buf);
                     }
                 }
             },
             CoreMsg::GlobalBufs(bufs) => {
                 debug!("New global buffers: {:?}", bufs);
                 for buf in bufs {
-                    let key = (None, Some(buf.name().to_owned()));
-                    if !self.bufs.contains_key(&key) {
-                        let (buf, bs) = Buffer::new(buf.name().to_owned());
-                        let buf = Rc::new(RefCell::new(buf));
-                        self.bufs.insert(key, (buf, Some(bs)));
-                    }
+                    self.get_or_create(BufKey::Global(buf.name().to_owned()));
                 }
             },
             CoreMsg::NetMsg(nid, nmsg) => self.handle_net_msg(nid, nmsg),
-            CoreMsg::BufMsg(bid, bmsg) => self.handle_buf_msg((None, Some(bid)), bmsg),
+            CoreMsg::BufMsg(bid, bmsg) => self.handle_buf_msg(BufKey::Global(bid), bmsg),
         }
     }
 
-    fn handle_net_msg(&mut self, net: NetId, msg: CoreNetMsg) {
+    fn handle_net_msg(&mut self, nid: NetId, msg: CoreNetMsg) {
         match msg {
             CoreNetMsg::State { connected } => {
                 if connected {
-                    info!("Core connected to network {}", net);
+                    self.status(format!("Core connected to network {}", nid));
                 } else {
-                    info!("Core disconnected from network {}", net);
+                    self.status(format!("Core disconnected from network {}", nid));
                 }
             },
             CoreNetMsg::Buffers(bufs) => {
-                debug!("New buffers for network {}: {:?}", net, bufs);
                 for buf in bufs {
-                    let key = (Some(net.clone()), Some(buf.name().to_owned()));
-                    if !self.bufs.contains_key(&key) {
-                        let (buf, bs) = Buffer::new(buf.name().to_owned());
-                        let buf = Rc::new(RefCell::new(buf));
-                        self.bufs.insert(key, (buf, Some(bs)));
-                    }
+                    self.status(format!("Added buffer {}", BufKey::from_targ(nid.clone(), buf.id.clone())));
+                    self.create_remote_buf(nid.clone(), buf);
                 }
             },
-            CoreNetMsg::BufMsg(BufTarget::Network, bmsg) => self.handle_buf_msg((Some(net), None), bmsg),
-            CoreNetMsg::BufMsg(BufTarget::Channel(buf), bmsg) =>
-                self.handle_buf_msg((Some(net), Some(buf)), bmsg),
-            CoreNetMsg::BufMsg(BufTarget::Private(buf), bmsg) =>
-                self.handle_buf_msg((Some(net), Some(buf)), bmsg),
+            CoreNetMsg::BufMsg(targ, bmsg) =>
+                self.handle_buf_msg(BufKey::from_targ(nid, targ), bmsg),
             CoreNetMsg::Joined(_) => unimplemented!(),
         }
     }
 
-    fn handle_buf_msg(&mut self, key: (Option<NetId>, Option<BufId>), msg: CoreBufMsg) {
+    fn handle_buf_msg(&mut self, key: BufKey, msg: CoreBufMsg) {
         let (buf, bs) = match self.bufs.get_mut(&key) {
-            Some(&mut (ref mut buf, Some(ref mut bs))) => (buf, bs),
+            Some(&mut BufEntry { ref mut buf, sender: Some(ref mut bs)}) => (buf, bs),
             _ => {
                 error!("Ignoring message for unknown buffer: {:?}", key);
                 return;
@@ -228,9 +245,9 @@ impl CoreModel {
         match msg {
             CoreBufMsg::State { joined } => {
                 if joined {
-                    info!("Joined channel {}", key.1.unwrap_or("*status*".to_owned()));
+                    self.status = Some(format!("Joined channel {}", key));
                 } else {
-                    info!("Parted channel {}", key.1.unwrap_or("*status*".to_owned()));
+                    self.status = Some(format!("Parted channel {}", key));
                 }
             },
             CoreBufMsg::NewLines(lines) => {

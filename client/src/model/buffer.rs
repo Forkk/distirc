@@ -1,5 +1,8 @@
+use std::fmt;
 use std::sync::mpsc::{channel, Sender, Receiver};
 use common::messages::BufferLine;
+
+use common::messages::{BufId, NetId, BufTarget};
 
 
 /// Sends lines to a `Buffer` in a thread-safe manner.
@@ -35,6 +38,7 @@ impl BufSender {
 /// way that is fast and doesn't change the indices of existing messages.
 #[derive(Debug)]
 pub struct Buffer {
+    key: BufKey,
     name: String,
     front_rx: Receiver<BufferLine>,
     back_rx: Receiver<BufferLine>,
@@ -51,7 +55,7 @@ pub struct Buffer {
 
 impl Buffer {
     /// Creates a new buffer, sender pair.
-    pub fn new(name: String) -> (Buffer, BufSender) {
+    pub fn new(key: BufKey) -> (Buffer, BufSender) {
         let (tx1, rx1) = channel();
         let (tx2, rx2) = channel();
 
@@ -60,7 +64,8 @@ impl Buffer {
             back: tx2,
         };
         let buf = Buffer {
-            name: name,
+            name: format!("{}", key),
+            key: key,
             front_rx: rx1,
             back_rx: rx2,
             log_req: 0,
@@ -160,4 +165,44 @@ impl Buffer {
     //         },
     //     });
     // }
+}
+
+
+/// Unique IDs for buffers.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BufKey {
+    /// The client's status buffer.
+    Status,
+    /// A named global system buffer.
+    Global(BufId),
+    /// A network's status buffer.
+    Network(NetId),
+    /// A channel buffer.
+    Channel(NetId, BufId),
+    /// A private message buffer.
+    Private(NetId, BufId),
+}
+
+impl BufKey {
+    /// Constructs a `BufKey` for the given network and `BufTarget`.
+    pub fn from_targ(nid: NetId, targ: BufTarget) -> BufKey {
+        match targ {
+            BufTarget::Network => BufKey::Network(nid.clone()),
+            BufTarget::Channel(bid) => BufKey::Channel(nid.clone(), bid),
+            BufTarget::Private(bid) => BufKey::Private(nid.clone(), bid),
+        }
+    }
+}
+
+
+impl fmt::Display for BufKey {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            BufKey::Status => write!(f, "*status*"),
+            BufKey::Global(ref bid) => write!(f, "*{}", bid),
+            BufKey::Network(ref nid) => write!(f, ".{}", nid),
+            BufKey::Channel(ref nid, ref bid) => write!(f, "{}<{}>", bid, nid),
+            BufKey::Private(ref nid, ref bid) => write!(f, "{}<{}>", bid, nid),
+        }
+    }
 }

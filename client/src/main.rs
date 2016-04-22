@@ -19,11 +19,11 @@ pub mod conn;
 
 use self::ui::TermUi;
 use self::conn::ConnThread;
-use self::model::{Buffer, BufSender};
+use self::model::{Buffer, BufSender, BufKey};
 
 fn main() {
     // env_logger::init().expect("Failed to initialize logger");
-    let (buf, bs) = Buffer::new("*status*".to_owned());
+    let (buf, bs) = Buffer::new(BufKey::Status);
     ClientLogger::init(bs, LogLevelFilter::Trace);
     info!("Hello! Welcome to distirc's terminal client.");
 

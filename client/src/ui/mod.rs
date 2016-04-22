@@ -30,7 +30,7 @@ pub struct TermUi {
     key: BufKey,
     quit: bool,
     /// Status message shown at the bottom of the screen.
-    status: Option<StatusMsg>,
+    status: Vec<StatusMsg>,
 }
 
 struct StatusMsg {
@@ -47,7 +47,7 @@ impl TermUi {
 
         let model = CoreModel::new(status, conn);
 
-        let key = (None, None);
+        let key = BufKey::Status;
         let buf = model.get(&key).unwrap().clone();
 
         Ok(TermUi {
@@ -58,7 +58,7 @@ impl TermUi {
             model: model,
             alerts: AlertList::new(),
             quit: false,
-            status: None,
+            status: vec![],
         })
     }
 
@@ -78,11 +78,12 @@ impl TermUi {
             self.send_ping_alerts();
             self.alerts.update();
 
-            if self.status.is_some() {
-                if time::now() - self.status.as_ref().unwrap().time > Duration::seconds(5) {
-                    self.status = None;
-                }
+            if let Some(status) = self.model.take_status() {
+                self.status(status);
             }
+
+            let now = time::now();
+            self.status.retain(|s| now - s.time < Duration::seconds(5));
 
             for bar in upper_bars.iter_mut() { bar.update(self); }
             for bar in lower_bars.iter_mut() { bar.update(self); }
@@ -110,14 +111,8 @@ impl TermUi {
     /// Sends alerts for any new pings or PMs.
     pub fn send_ping_alerts(&mut self) {
         for key in self.model.take_pings().into_iter() {
-            let name = match key {
-                (Some(ref net), Some(ref buf)) => format!("{}<{}>", buf, net),
-                (None, Some(ref buf)) => format!("global buffer {}", buf),
-                (Some(ref net), None) => format!("network buffer for {}", net),
-                (None, None) => format!("status buffer"),
-            };
             if !self.alerts.iter().any(|a| a.kind == AlertKind::Ping(key.clone())) && self.key != key {
-                let a = Alert::ping(key.clone(), format!("Pinged in {}", name))
+                let a = Alert::ping(key.clone(), format!("Pinged in {}", key))
                     .action(move |ui| {
                         ui.switch_buf(key.clone())
                     });
@@ -147,13 +142,13 @@ impl TermUi {
             "quit" => { self.quit = true; },
             "s" | "switch" => {
                 if args == "" {
-                    self.switch_buf((None, None));
+                    self.switch_buf(BufKey::Status);
                 } else {
-                    if let Some((serv, buf)) = self.model.bufs.iter()
-                        .map(|(k, _)| k.clone())
-                        .find(|&(_, ref b)| b == &Some(args.to_owned()))
+                    if let Some(key) = self.model.bufs.iter()
+                        .map(|(key, _)| key.clone())
+                        .find(|key| format!("{}", key).contains(args))
                     {
-                        self.switch_buf((serv, buf));
+                        self.switch_buf(key);
                     } else {
                         self.status(format!("No buffer found matching {}", args));
                     }
@@ -200,7 +195,7 @@ impl TermUi {
 
 
     pub fn status(&mut self, msg: String) {
-        self.status = Some(StatusMsg {
+        self.status.push(StatusMsg {
             msg: msg,
             time: time::now(),
         });
@@ -250,7 +245,7 @@ impl TermUi {
         let y1 = top_height;
         let mut y2 = self.rb.height() - 1 - bot_height;
 
-        if let Some(ref s) = self.status {
+        for ref s in self.status.iter() {
             use rustbox::Color::*;
             use rustbox::RB_NORMAL;
             self.rb.blank_line(y2-1, RB_NORMAL, White, Black);
