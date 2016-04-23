@@ -16,7 +16,7 @@ mod util;
 use self::entry::TextEntry;
 use self::buffer::BufferView;
 use self::bar::{StatusBar, MainBar, AlertBar};
-use self::alert::{AlertList, Alert, AlertKind};
+use self::alert::{AlertList, ClientAlert, AlertKind};
 use self::util::RustBoxExt;
 
 
@@ -75,8 +75,8 @@ impl TermUi {
 
         'main: loop {
             self.model.update();
-            self.send_ping_alerts();
             self.alerts.update();
+            self.post_alerts();
 
             if let Some(status) = self.model.take_status() {
                 self.status(status);
@@ -108,16 +108,21 @@ impl TermUi {
     }
 
 
-    /// Sends alerts for any new pings or PMs.
-    pub fn send_ping_alerts(&mut self) {
-        for key in self.model.take_pings().into_iter() {
-            if !self.alerts.iter().any(|a| a.kind == AlertKind::Ping(key.clone())) && self.key != key {
-                let a = Alert::ping(key.clone(), format!("Pinged in {}", key))
-                    .action(move |ui| {
-                        ui.switch_buf(key.clone())
+    /// Adds any new alerts from the model to the alert list.
+    pub fn post_alerts(&mut self) {
+        for alert in self.model.take_alerts().into_iter() {
+            let mut a = ClientAlert::new(alert);
+            match a.info.kind.clone() {
+                AlertKind::Ping(ref nid, ref bid) => {
+                    let nid = nid.clone();
+                    let bid = bid.clone();
+                    a = a.action(move |ui| {
+                        ui.switch_buf(BufKey::Channel(nid.clone(), bid.clone()));
                     });
-                self.alerts.push(a);
+                },
+                _ => {},
             }
+            self.alerts.push(a);
         }
     }
 

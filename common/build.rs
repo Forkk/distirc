@@ -10,6 +10,7 @@ pub fn main() {
     let files = vec![
         (Path::new("src/line.rs.in"), Path::new(&out_dir).join("line.rs")),
         (Path::new("src/messages.rs.in"), Path::new(&out_dir).join("messages.rs")),
+        (Path::new("src/alert.rs.in"), Path::new(&out_dir).join("alert.rs")),
     ];
 
     for (src, dst) in files {

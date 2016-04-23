@@ -14,6 +14,7 @@ use common::messages::{
 use user::UserState;
 use config::{UserConfig, UserId};
 use network::{IrcNetwork, BufHandle};
+use handle::BaseUpdateHandle;
 
 
 struct User {
@@ -277,9 +278,15 @@ impl Client {
                 }).send(CoreMsg::NetMsg(buf.netid().clone(), nmsg))
             },
             ClientBufMsg::SendMsg(ref msg) => {
-                buf.send_privmsg(msg.clone(), &mut |m| {
-                    clients.broadcast(&m)
-                });
+                let mut u = BaseUpdateHandle::<CoreMsg>::new();
+                buf.send_privmsg(msg.clone(), &mut u);
+                if !u.take_alerts().is_empty() {
+                    // TODO: Implement this
+                    error!("Cannot send alerts in response to client `SendMsg` message");
+                }
+                for msg in u.take_msgs() {
+                    clients.broadcast(&msg);
+                }
                 Action::ok(self)
             },
             ClientBufMsg::PartChan(ref optmsg) => {
@@ -321,6 +328,11 @@ impl Machine for Updater {
             user.state.update(&mut msgs);
             for msg in msgs {
                 user.clients.broadcast(&msg);
+            }
+
+            if !user.clients.0.is_empty() {
+                let alerts = user.state.take_alerts();
+                user.clients.broadcast(&CoreMsg::Alerts(alerts));
             }
         }
         Response::ok(self)

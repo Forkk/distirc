@@ -12,3 +12,4 @@ pub mod types;
 pub mod conn;
 pub mod messages;
 pub mod line;
+pub mod alert;

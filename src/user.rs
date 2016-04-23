@@ -10,15 +10,19 @@ use rotor::Notifier;
 
 use common::messages::CoreMsg;
 use common::types::NetId;
+use common::alert::Alert;
 
 use network::IrcNetwork;
 use config::{UserConfig, IrcNetConfig};
+use handle::{BaseUpdateHandle};
 
 
 // #[derive(Debug)]
 pub struct UserState {
     networks: HashMap<NetId, IrcNetwork>,
     wake: Notifier,
+    /// Queue for alerts that happened while no client was connected.
+    alerts: Vec<Alert>,
 }
 
 impl UserState {
@@ -26,6 +30,7 @@ impl UserState {
         UserState {
             networks: HashMap::new(),
             wake: wake,
+            alerts: vec![],
         }
     }
 
@@ -49,9 +54,12 @@ impl UserState {
 
     /// Process messages from servers and clients
     pub fn update(&mut self, msgs: &mut Vec<CoreMsg>) {
+        let mut u = BaseUpdateHandle::<CoreMsg>::new();
         for (_, serv) in self.networks.iter_mut() {
-            serv.update(msgs);
+            serv.update(&mut u);
         }
+        self.alerts.append(&mut u.take_alerts());
+        msgs.append(&mut u.take_msgs());
     }
 
     pub fn iter_nets(&self) -> IterNets {
@@ -64,6 +72,13 @@ impl UserState {
 
     pub fn get_network_mut(&mut self, id: &NetId) -> Option<&mut IrcNetwork> {
         self.networks.get_mut(id)
+    }
+
+    pub fn take_alerts(&mut self) -> Vec<Alert> {
+        use std::mem;
+        let mut alerts = vec![];
+        mem::swap(&mut alerts, &mut self.alerts);
+        alerts
     }
 }
 

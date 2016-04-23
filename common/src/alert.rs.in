@@ -1,0 +1,32 @@
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AlertKind {
+    /// A ping in the given channel.
+    Ping(NetId, BufId),
+    /// A private message from a user on a given network.
+    PrivateMsg(NetId, BufId),
+    Misc,
+}
+
+/// This struct stores information about an alert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alert {
+    pub kind: AlertKind,
+    pub msg: String,
+}
+
+impl Alert {
+    pub fn ping(nid: NetId, bid: BufId, msg: String) -> Alert {
+        Self::new(msg, AlertKind::Ping(nid, bid))
+    }
+    pub fn privmsg(nid: NetId, bid: BufId, msg: String) -> Alert {
+        Self::new(msg, AlertKind::PrivateMsg(nid, bid))
+    }
+
+    pub fn new(msg: String, kind: AlertKind) -> Alert {
+        Alert {
+            kind: kind,
+            msg: msg,
+        }
+    }
+}

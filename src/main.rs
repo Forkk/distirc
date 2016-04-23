@@ -20,6 +20,7 @@ use common::conn::ConnStream;
 
 pub mod config;
 pub mod user;
+pub mod handle;
 pub mod network;
 pub mod buffer;
 pub mod conn;
@@ -39,8 +40,6 @@ fn main() {
 
     let cfg_path = Path::new("config.toml");
     let cfg = read_config(cfg_path);
-
-    debug!("Created test config.");
 
     debug!("Creating loop.");
     let mut loop_creator = Loop::new(&LoopCfg::new()).unwrap();

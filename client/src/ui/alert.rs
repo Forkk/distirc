@@ -6,23 +6,18 @@
 use time;
 use time::{Tm, Duration};
 
+pub use common::alert::{Alert, AlertKind};
+
 use super::TermUi;
 use model::BufKey;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum AlertKind {
-    // Error,
-    // Warning,
-    Ping(BufKey),
-    Notice,
-}
 
 pub type AlertAction = Box<FnMut(&mut TermUi)>;
 
-/// This struct defines information about an alert.
-pub struct Alert {
-    pub kind: AlertKind,
-    pub msg: String,
+/// Stores client-side state for an alert.
+pub struct ClientAlert {
+    /// The actual alert data.
+    pub info: Alert,
     /// The duration to show the alert for. If `None`, the alert will be shown
     /// until the user opens it.
     time: Option<Duration>,
@@ -30,16 +25,10 @@ pub struct Alert {
     action: Option<AlertAction>,
 }
 
-impl Alert {
-    // pub fn error(msg: String) -> Alert { Self::new(msg, AlertKind::Error) }
-    // pub fn warning(msg: String) -> Alert { Self::new(msg, AlertKind::Warning) }
-    pub fn ping(k: BufKey, msg: String) -> Alert { Self::new(msg, AlertKind::Ping(k)) }
-    pub fn notice(msg: String) -> Alert { Self::new(msg, AlertKind::Notice) }
-
-    pub fn new(msg: String, kind: AlertKind) -> Alert {
-        Alert {
-            kind: kind,
-            msg: msg,
+impl ClientAlert {
+    pub fn new(info: Alert) -> Self {
+        ClientAlert {
+            info: info,
             time: None,
             action: None,
         }
@@ -69,7 +58,7 @@ impl Alert {
 
 /// Active alert state.
 struct AlertState {
-    def: Alert,
+    def: ClientAlert,
     shown_at: Tm,
 }
 
@@ -87,13 +76,13 @@ impl AlertList {
     }
 
     /// Pushes a new alert into the list.
-    pub fn push(&mut self, alert: Alert) {
+    pub fn push(&mut self, alert: ClientAlert) {
         let state = AlertState {
             def: alert,
             shown_at: time::now(),
         };
         self.alerts.push(state);
-        self.alerts.sort_by_key(|a| a.def.kind.clone());
+        self.alerts.sort_by_key(|a| a.def.info.kind.clone());
     }
 
     /// Updates the alert list, removing any alerts which have exceeded their
@@ -105,19 +94,15 @@ impl AlertList {
                 t > (s.shown_at - now)
             } else { true }
         });
-        self.alerts.sort_by_key(|a| a.def.kind.clone());
+        self.alerts.sort_by_key(|a| a.def.info.kind.clone());
     }
 
     pub fn count(&self) -> usize {
         self.alerts.len()
     }
 
-    pub fn get(&self, i: usize) -> &Alert {
+    pub fn get(&self, i: usize) -> &ClientAlert {
         &self.alerts[i].def
-    }
-
-    pub fn iter<'a>(&'a self) -> Box<Iterator<Item=&Alert> + 'a> {
-        Box::new(self.alerts.iter().map(|a| &a.def)) as Box<Iterator<Item=_>>
     }
 
     /// Dismisses the given alert and returns its action if present.

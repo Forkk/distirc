@@ -49,8 +49,6 @@ pub struct Buffer {
     front: Vec<BufferLine>,
     /// Scrollback lines in reverse order. The first of these is at index -1.
     back: Vec<BufferLine>,
-    /// True if there's an unhandled ping in this buffer.
-    ping: bool,
 }
 
 impl Buffer {
@@ -71,7 +69,6 @@ impl Buffer {
             log_req: 0,
             front: vec![],
             back: vec![],
-            ping: false,
         };
         (buf, sender)
     }
@@ -81,9 +78,8 @@ impl Buffer {
     }
 
     /// Receives new messages from the sender.
-    pub fn update(&mut self, ping: &mut bool) {
+    pub fn update(&mut self) {
         while let Ok(line) = self.front_rx.try_recv() {
-            if line.has_ping() { *ping = true; };
             self.front.push(line)
         }
         while let Ok(line) = self.back_rx.try_recv() {

@@ -8,6 +8,7 @@ use common::messages::{
     BufTarget, NetId, BufInfo,
     CoreMsg, CoreBufMsg, CoreNetMsg,
     ClientMsg, ClientNetMsg, ClientBufMsg,
+    Alert,
 };
 
 use conn::ConnThread;
@@ -26,9 +27,9 @@ pub struct CoreModel {
     // network's status buffer.
     pub bufs: HashMap<BufKey, BufEntry>,
     conn: ConnThread,
-    // List of new buffers with pings.
-    pings: Vec<BufKey>,
     status: Option<String>,
+    // List of new alerts.
+    alerts: Vec<Alert>,
 }
 
 /// Type for storing buffers in the model.
@@ -49,7 +50,7 @@ impl CoreModel {
         CoreModel {
             bufs: bufs,
             conn: conn,
-            pings: vec![],
+            alerts: vec![],
             status: None,
         }
     }
@@ -93,13 +94,12 @@ impl CoreModel {
     }
 
 
-    /// Returns a vector of buffers that the user has been mentioned in since
-    /// the last time it was called.
-    pub fn take_pings(&mut self) -> Vec<BufKey> {
+    /// Returns a vector of new alerts.
+    pub fn take_alerts(&mut self) -> Vec<Alert> {
         use std::mem;
-        let mut pings = vec![];
-        mem::swap(&mut pings, &mut self.pings);
-        pings
+        let mut alerts = vec![];
+        mem::swap(&mut alerts, &mut self.alerts);
+        alerts
     }
 
 
@@ -179,13 +179,8 @@ impl CoreModel {
         while let Some(msg) = self.conn.recv() {
             self.handle_msg(msg);
         }
-        for (key, &mut BufEntry { ref mut buf, .. }) in self.bufs.iter_mut() {
-            let mut ping = false;
-            buf.borrow_mut().update(&mut ping);
-            if ping {
-                debug!("Pushing ping for {:?}", &key);
-                self.pings.push(key.clone());
-            }
+        for (_, &mut BufEntry { ref mut buf, .. }) in self.bufs.iter_mut() {
+            buf.borrow_mut().update();
         }
         self.send_log_reqs();
     }
@@ -208,6 +203,7 @@ impl CoreModel {
             },
             CoreMsg::NetMsg(nid, nmsg) => self.handle_net_msg(nid, nmsg),
             CoreMsg::BufMsg(bid, bmsg) => self.handle_buf_msg(BufKey::Global(bid), bmsg),
+            CoreMsg::Alerts(mut alerts) => self.alerts.append(&mut alerts),
         }
     }
 
@@ -233,7 +229,7 @@ impl CoreModel {
     }
 
     fn handle_buf_msg(&mut self, key: BufKey, msg: CoreBufMsg) {
-        let (buf, bs) = match self.bufs.get_mut(&key) {
+        let (__buf, bs) = match self.bufs.get_mut(&key) {
             Some(&mut BufEntry { ref mut buf, sender: Some(ref mut bs)}) => (buf, bs),
             _ => {
                 error!("Ignoring message for unknown buffer: {:?}", key);
@@ -241,7 +237,6 @@ impl CoreModel {
             },
         };
 
-        let key2 = key.clone();
         match msg {
             CoreBufMsg::State { joined } => {
                 if joined {
@@ -262,13 +257,6 @@ impl CoreModel {
                     bs.send_back(line);
                 }
             },
-        }
-
-        let mut ping = false;
-        buf.borrow_mut().update(&mut ping);
-        if ping {
-            debug!("Pushing ping for {:?}", &key2);
-            self.pings.push(key2);
         }
     }
 }

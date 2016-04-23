@@ -74,7 +74,6 @@ impl Log for ClientLogger {
                 from: "status".to_owned(),
                 msg: msg,
                 kind: MsgKind::Status,
-                ping: false,
             };
 
             let line = BufferLine::new(time::now(), data);

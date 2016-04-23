@@ -84,7 +84,7 @@ impl StatusBar for AlertBar {
             let alert = ui.alerts.get(i);
             let mut lb = LineBuilder::new();
             lb.add_column(format!("{}: ", i+1)).fgcolor(White).bgcolor(Black).pad_left(4);
-            lb.add_column(alert.msg.clone()).fgcolor(White).bgcolor(Black);
+            lb.add_column(alert.info.msg.clone()).fgcolor(White).bgcolor(Black);
 
             lb.print(y+i, &mut ui.rb);
         }

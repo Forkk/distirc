@@ -12,6 +12,7 @@ use common::types::NetId;
 
 use config::IrcNetConfig;
 use buffer::Buffer;
+use handle::UpdateHandle;
 
 /// This struct represents an IRC network and its state, including the
 /// connection.
@@ -57,8 +58,13 @@ impl IrcNetwork {
     }
 
     /// Processes messages from the server.
-    pub fn update(&mut self, msgs: &mut Vec<CoreMsg>) {
-        let mut nms = vec![];
+    pub fn update<U>(&mut self, u: &mut U)
+        where U : UpdateHandle<CoreMsg>
+    {
+        let nid = self.name.clone();
+        let mut net_uh = u.wrap(|msg| {
+            CoreMsg::NetMsg(nid.clone(), msg)
+        });
         let mut disconn = false;
         'recv: loop {
             let (m, nick) = if let Some((ref conn, ref mut rx)) = self.conn {
@@ -75,11 +81,7 @@ impl IrcNetwork {
             } else {
                 break 'recv;
             };
-            self.handle_msg(m, &nick, &mut nms);
-        }
-
-        for msg in nms.into_iter() {
-            msgs.push(CoreMsg::NetMsg(self.name.clone(), msg));
+            self.handle_msg(m, &nick, &mut net_uh);
         }
 
         if disconn {
@@ -88,22 +90,23 @@ impl IrcNetwork {
         }
     }
 
-    pub fn handle_msg(&mut self, msg: Message, nick: &str, msgs: &mut Vec<CoreNetMsg>) {
+    pub fn handle_msg<U>(&mut self, msg: Message, nick: &str, u: &mut U)
+        where U : UpdateHandle<CoreNetMsg>
+    {
         let pfx = msg.prefix.clone().map(|p| Sender::parse_prefix(&p));
-        let mut send = |m| { msgs.push(m); };
         match pfx {
-            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, &mut send),
+            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, u),
             Some(Sender::Server(_)) => {
-                self.server_msg(&msg, &mut send);
+                self.server_msg(&msg, u);
             },
             None => {
-                self.server_msg(&msg, &mut send);
+                self.server_msg(&msg, u);
             },
         }
     }
 
-    fn user_msg<S>(&mut self, user: &User, msg: &Message, nick: &str, send: &mut S)
-        where S: FnMut(CoreNetMsg)
+    fn user_msg<U>(&mut self, user: &User, msg: &Message, nick: &str, u: &mut U)
+        where U : UpdateHandle<CoreNetMsg>
     {
         debug!("Handling IRC message {:?}", msg);
         if let Some(dest) = msg.get_dest() {
@@ -122,22 +125,20 @@ impl IrcNetwork {
             if let Some(targ) = targ {
                 let mut buf = if !self.bufs.contains_key(&targ) {
                     let buf = Buffer::new(self.name.clone(), targ.clone());
-                    send(CoreNetMsg::Buffers(vec![buf.as_info()]));
+                    u.send_msg(CoreNetMsg::Buffers(vec![buf.as_info()]));
                     self.bufs.entry(targ.clone()).or_insert(buf)
                 } else { self.bufs.get_mut(&targ).unwrap() };
 
-                buf.user_msg(user, msg, nick, &mut |msg| {
-                    send(CoreNetMsg::BufMsg(targ.clone(), msg));
-                });
+                let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
+                buf.user_msg(user, msg, nick, &mut buf_uh);
             }
         } else {
             match msg.command {
                 Command::QUIT(ref quitmsg) => {
                     for (targ, ref mut buf) in self.bufs.iter_mut() {
                         if buf.has_user(&user.nick) {
-                            buf.user_quit(user, quitmsg.clone(), &mut |msg| {
-                                send(CoreNetMsg::BufMsg(targ.clone(), msg));
-                            });
+                            let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
+                            buf.user_quit(user, quitmsg.clone(), &mut buf_uh);
                         }
                     }
                 },
@@ -148,8 +149,8 @@ impl IrcNetwork {
         }
     }
 
-    fn server_msg<S>(&mut self, msg: &Message, _send: &mut S)
-        where S: FnMut(CoreNetMsg)
+    fn server_msg<U>(&mut self, msg: &Message, _u: &mut U)
+        where U : UpdateHandle<CoreNetMsg>
     {
         use irc::client::data::Response::*;
         match msg.command {
@@ -235,10 +236,9 @@ impl<'a> BufHandle<'a> {
     }
 
     /// Sends a PRIVMSG to this buffer's target.
-    pub fn send_privmsg<S>(&mut self, msg: String, send: &mut S)
-        where S: FnMut(CoreMsg)
+    pub fn send_privmsg<U>(&mut self, msg: String, u: &mut U)
+        where U: UpdateHandle<CoreMsg>
     {
-        let netid = self.netid.clone();
         if let Some(ref mut irc) = self.irc {
             let targ = self.buf.id().clone();
             let dest = match targ {
@@ -256,14 +256,17 @@ impl<'a> BufHandle<'a> {
                 command: Command::PRIVMSG(dest.clone(), msg.clone()),
             };
             irc.send(ircmsg).expect("Failed to send message to IRC server");
+
+            let nid = self.netid.clone();
+            let mut buf_uh = u.wrap(|msg| {
+                CoreMsg::NetMsg(nid.clone(), CoreNetMsg::BufMsg(targ.clone(), msg))
+            });
+
             self.buf.push_line(LineData::Message {
                 kind: MsgKind::PrivMsg,
                 from: irc.current_nickname().to_owned(),
                 msg: msg,
-                ping: false,
-            }, &mut |m| {
-                send(CoreMsg::NetMsg(netid.clone(), CoreNetMsg::BufMsg(targ.clone(), m)));
-            });
+            }, &mut buf_uh);
         }
     }
 

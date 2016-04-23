@@ -47,6 +47,7 @@ impl BufTarget {
 mod core {
     use line::BufferLine;
     use types::{NetId, BufId};
+    use alert::Alert;
     use super::{BufTarget, NetInfo, BufInfo};
 
     /// Messages sent from the core.
@@ -63,6 +64,9 @@ mod core {
 
         /// Wrapper for messages about a global buffer.
         BufMsg(BufId, CoreBufMsg),
+
+        /// Lets the client know about some alerts that occurred.
+        Alerts(Vec<Alert>),
     }
 
     /// Messages sent from the core about a specific network.

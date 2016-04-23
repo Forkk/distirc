@@ -4,16 +4,18 @@ use irc::client::prelude::*;
 use time;
 
 use common::line::{BufferLine, LineData, MsgKind, User};
-use common::messages::{NetId, BufInfo, BufTarget, CoreBufMsg};
+use common::messages::{NetId, BufInfo, Alert, BufTarget, CoreBufMsg};
 
 mod log;
 
+use handle::UpdateHandle;
 use self::log::BufferLog;
 
 /// A buffer within a network.
 #[derive(Debug, Clone)]
 pub struct Buffer {
     id: BufTarget,
+    nid: NetId,
     line_id: usize,
     topic: String,
     /// Messages received since the core started running.
@@ -32,12 +34,13 @@ impl Buffer {
     pub fn new(nid: NetId, id: BufTarget) -> Buffer {
         let mut path = env::current_dir().expect("Failed to get cwd");
         path.push("logs");
-        path.push(nid);
+        path.push(nid.clone());
         path.push(id.name());
         let mut log = BufferLog::new(path);
 
         Buffer {
             id: id,
+            nid: nid,
             line_id: 0,
             topic: String::new(),
             front: vec![],
@@ -96,8 +99,8 @@ impl Buffer {
 
     /// Pushes a message into the buffer and posts a `NewLines` message to the
     /// given message buffer.
-    pub fn push_line<S>(&mut self, data: LineData, send: &mut S)
-        where S: FnMut(CoreBufMsg)
+    pub fn push_line<U>(&mut self, data: LineData, u: &mut U)
+        where U : UpdateHandle<CoreBufMsg>
     {
         let line = BufferLine::new(time::now(), data);
         trace!("Buffer {}: Pushing line {:?}", self.id.name(), line);
@@ -105,7 +108,7 @@ impl Buffer {
         self.front.push(line.clone());
         self.log.write_lines(vec![line.clone()]);
 
-        send(CoreBufMsg::NewLines(vec![line]));
+        u.send_msg(CoreBufMsg::NewLines(vec![line]));
     }
 
 
@@ -114,8 +117,8 @@ impl Buffer {
     }
 
 
-    pub fn user_msg<S>(&mut self, user: &User, msg: &Message, my_nick: &str, send: &mut S)
-        where S: FnMut(CoreBufMsg)
+    pub fn user_msg<U>(&mut self, user: &User, msg: &Message, my_nick: &str, u: &mut U)
+        where U : UpdateHandle<CoreBufMsg>
     {
         match msg.command {
             Command::JOIN(_, _, _) => {
@@ -127,7 +130,7 @@ impl Buffer {
                     self.users.insert(user.nick.clone());
                     trace!("Users: {:?}", self.users);
                 }
-                self.push_line(LineData::Join { user: user.clone() }, send)
+                self.push_line(LineData::Join { user: user.clone() }, u)
             }
             Command::PART(_, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
@@ -143,7 +146,7 @@ impl Buffer {
                 self.push_line(LineData::Part {
                     user: user.clone(),
                     reason: reason,
-                }, send)
+                }, u)
             }
             Command::KICK(_, ref target, ref reason) => {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
@@ -160,37 +163,46 @@ impl Buffer {
                     by: user.clone(),
                     user: target.clone(),
                     reason: reason,
-                }, send)
+                }, u)
             }
             Command::PRIVMSG(_, ref msg) => {
+                if let BufTarget::Channel(ref bid) = self.id {
+                    if msg.contains(my_nick) {
+                        // Push a ping
+                        let msg = format!("Pinged by {} in channel {}", &user.nick, bid);
+                        u.post_alert(Alert::ping(self.nid.clone(), bid.clone(), msg));
+                    }
+                } else if let BufTarget::Private(ref bid) = self.id {
+                    let msg = format!("New private message from {}", &user.nick);
+                    u.post_alert(Alert::privmsg(self.nid.clone(), bid.clone(), msg));
+                }
+
                 self.push_line(LineData::Message {
                     kind: MsgKind::PrivMsg,
                     from: user.nick.clone(),
-                    ping: msg.contains(my_nick),
                     msg: msg.clone(),
-                }, send)
+                }, u)
             }
             Command::NOTICE(_, ref msg) => {
                 self.push_line(LineData::Message {
                     kind: MsgKind::Notice,
                     from: user.nick.clone(),
-                    ping: false,
                     msg: msg.clone(),
-                }, send)
+                }, u)
             }
             _ => {}
         }
     }
 
-    pub fn user_quit<S>(&mut self, user: &User, msg: Option<String>, send: &mut S)
-        where S: FnMut(CoreBufMsg)
+    pub fn user_quit<U>(&mut self, user: &User, msg: Option<String>, u: &mut U)
+        where U : UpdateHandle<CoreBufMsg>
     {
         debug!("User {} quit buffer {}", user.nick, self.id.name());
         self.users.remove(&user.nick);
         self.push_line(LineData::Quit {
             user: user.clone(),
             msg: msg,
-        }, send);
+        }, u);
         trace!("Users: {:?}", self.users);
     }
 
