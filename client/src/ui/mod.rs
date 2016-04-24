@@ -11,6 +11,7 @@ mod buffer;
 mod entry;
 mod bar;
 mod alert;
+mod wrap;
 mod util;
 
 use self::entry::TextEntry;
@@ -242,13 +243,15 @@ impl TermUi {
     fn render(&mut self, btop: &mut Vec<Box<StatusBar>>, bbot: &mut Vec<Box<StatusBar>>) {
         self.rb.clear();
 
-        self.entry.render(&mut self.rb);
-
         let top_height = btop.iter().fold(0, |acc, bar| acc + bar.height(&self));
         let bot_height = bbot.iter().fold(0, |acc, bar| acc + bar.height(&self));
 
+        // FIXME: This computes wrapping twice.
+        let ent_h = self.entry.height(&mut self.rb);
+        self.entry.render(&mut self.rb);
+
         let y1 = top_height;
-        let mut y2 = self.rb.height() - 1 - bot_height;
+        let mut y2 = self.rb.height() - ent_h - bot_height;
 
         for ref s in self.status.iter() {
             use rustbox::Color::*;
@@ -265,10 +268,8 @@ impl TermUi {
         }
         let h = self.rb.height();
         for (y, bar) in bbot.iter_mut().rev().enumerate() {
-            bar.render(h - 2 - y, self);
+            bar.render(h - ent_h - 1 - y, self);
         }
-
-
 
         self.rb.present();
     }

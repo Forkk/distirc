@@ -3,6 +3,8 @@
 use std::cmp;
 use rustbox::{RustBox, Color, Style};
 
+use super::wrap::StringWrap;
+
 /// Extension trait for `RustBox` utils.
 pub trait RustBoxExt : Sized {
     /// Checks how wide the given text would be in the terminal.
@@ -76,7 +78,7 @@ impl LineBuilder {
 
             if col.wrap {
                 let wrap = col.wrap_to(w);
-                let h = wrap.points.len();
+                let h = wrap.line_count();
                 max_h = cmp::max(h, max_h);
             }
 
@@ -99,16 +101,8 @@ impl LineBuilder {
 
             if col.wrap {
                 let wrap = col.wrap_to(w);
-                for i in 0..wrap.points.len() {
-                    // The start of this line.
-                    let start = wrap.points[i];
-                    // The end of this line.
-                    let end = if i < wrap.points.len() - 1 {
-                        wrap.points[i+1]
-                    } else { col.text.len() };
-
-                    let text = &col.text[start..end];
-                    rb.print(x, y + i, col.style, col.fgcolor, col.bgcolor, text);
+                for (i, line) in wrap.iter_lines(&col.text).enumerate() {
+                    rb.print(x, y + i - 1, col.style, col.fgcolor, col.bgcolor, line);
                 }
             } else {
                 let text = match col.pad {
@@ -130,7 +124,7 @@ pub struct ColBuilder {
     text: String,
     /// If true, text will be wrapped onto subsequent lines.
     wrap: bool,
-    wrapping: Option<ColWrapping>,
+    wrapping: Option<StringWrap>,
     /// The column's width and padding. If `None`, the column will expand to
     /// fill the entire remaining width of the screen.
     pad: Option<PadText>,
@@ -178,48 +172,13 @@ impl ColBuilder {
     }
 }
 
-
-/// Stores the result of line-wrapping a column.
-#[derive(Debug, Clone)]
-struct ColWrapping {
-    /// Indices at which the line will be wrapped.
-    points: Vec<usize>,
-    /// Width this column was wrapped to.
-    width: usize,
-}
-
 impl ColBuilder {
     /// Calculates line wrapping for this column.
-    fn wrap_to(&mut self, width: usize) -> ColWrapping {
-        let mut points = vec![0];
-
-        // Track the last index where we saw a space.
-        let mut last_spc = None;
-        let mut last_split = 0;
-        for (i, ch) in self.text.char_indices() {
-            let x = i - last_split;
-            // If we've exceeded our width, add a wrap point at the last space.
-            if x > width {
-                if let Some(p) = last_spc {
-                    points.push(p + 1);
-                    last_split = p + 1;
-                } else {
-                    // If there's no space to wrap to, we have to break the line
-                    // at our current position.
-                    points.push(i);
-                    last_split = i;
-                }
-            }
-
-            if ch == ' ' { last_spc = Some(i); }
-        }
-
-        ColWrapping {
-            points: points,
-            width: width,
-        }
+    fn wrap_to(&mut self, width: usize) -> StringWrap {
+        StringWrap::new(&self.text, width)
     }
 }
+
 
 #[derive(Debug, Clone)]
 pub enum PadText {

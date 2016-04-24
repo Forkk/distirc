@@ -3,6 +3,8 @@
 use std::collections::VecDeque;
 use rustbox::{ RustBox, Event, Key, Style, Color };
 
+use super::wrap::StringWrap;
+
 /// The IRC client's text box.
 pub struct TextEntry {
     // FIXME: Store cursor position as a pair of terminal column and string index.
@@ -32,10 +34,26 @@ impl TextEntry {
         self.cmds.pop_front()
     }
 
+
+    /// Queries the height of the entry in the given terminal.
+    pub fn height(&self, rb: &mut RustBox) -> usize {
+        StringWrap::new(self.get_text(), rb.width()).line_count()
+    }
+
+    /// Renders the text entry in the given terminal.
     pub fn render(&self, rb: &mut RustBox) {
+        let w = rb.width();
         let h = rb.height();
-        rb.print(0, h - 1, Style::empty(), Color::Default, Color::Default, self.get_text());
-        rb.set_cursor(self.cursor_col(), h as isize - 1);
+
+        let wrap = StringWrap::new(self.get_text(), w);
+        let ent_y = h - wrap.line_count();
+
+        for (i, line) in wrap.iter_lines(self.get_text()).enumerate() {
+            rb.print(0, ent_y + i - 1, Style::empty(), Color::Default, Color::Default, line);
+        }
+
+        let (x, y) = wrap.idx_pos(self.cursor_col() as usize);
+        rb.set_cursor(x, ent_y as isize + y);
     }
 
     /// Handles an event

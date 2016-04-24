@@ -9,7 +9,6 @@ use time::{Tm, Duration};
 pub use common::alert::{Alert, AlertKind};
 
 use super::TermUi;
-use model::BufKey;
 
 
 pub type AlertAction = Box<FnMut(&mut TermUi)>;
