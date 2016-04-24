@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use toml;
 use toml::Parser;
-use irc::client::prelude::Config;
+use irc::client::prelude::Config as IrcLibConfig;
 use rustc_serialize::Decodable;
 
 use common::types::NetId;
@@ -40,27 +40,83 @@ pub fn read_config(path: &Path) -> ChatConfig {
 
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct ChatConfig {
-    pub users: HashMap<UserId, UserConfig>,
+    pub user: HashMap<UserId, UserConfig>,
 }
 
 /// Represents the configuration for a user.
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct UserConfig {
-    pub nets: HashMap<NetId, IrcNetConfig>,
+    pub net: HashMap<NetId, NetConfig>,
+    /// Password to authenticate as this user.
+    pub password: String,
     /// Command to run when there are no clients to send alerts to.
     pub alert_cmd: Option<String>,
 }
 
-/// Represents the configuration for a network.
+
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
-pub struct IrcNetConfig {
-    pub irc: Config,
+pub struct NetConfig {
+    nick: String,
+    alt_nicks: Vec<String>,
+    nickserv_pass: Option<String>,
+    channels: Vec<String>,
+    username: Option<String>,
+    realname: Option<String>,
+
+    // Server options
+    server: String,
+    port: Option<u16>,
+    password: Option<String>,
+    use_ssl: Option<bool>,
 }
+
+impl NetConfig {
+    pub fn nick(&self) -> &str { &self.nick }
+    pub fn alt_nicks(&self) -> Vec<String> {
+        self.alt_nicks.iter().map(|n| n.clone()).collect()
+    }
+    pub fn username(&self) -> &str {
+        self.username.as_ref().map_or(self.nick(), |n| &n[..])
+    }
+    pub fn realname(&self) -> &str {
+        self.realname.as_ref().map_or(self.nick(), |n| &n[..])
+    }
+    pub fn nickserv_pass(&self) -> Option<&str> {
+        self.nickserv_pass.as_ref().map(|n| &n[..])
+    }
+
+    pub fn server(&self) -> &str { &self.server }
+    pub fn port(&self) -> u16 { self.port.unwrap_or(6667) }
+    pub fn channels(&self) -> Vec<String> {
+        self.channels.iter().map(|n| n.clone()).collect()
+    }
+}
+
+
+impl NetConfig {
+    /// Generates an `IrcLibConfig` struct from this config.
+    pub fn irc_config(&self) -> IrcLibConfig {
+        IrcLibConfig {
+            nickname: Some(self.nick().to_owned()),
+            alt_nicks: Some(self.alt_nicks()),
+            nick_password: self.nickserv_pass.clone(),
+            username: Some(self.username().to_owned()),
+            realname: Some(self.realname().to_owned()),
+            channels: Some(self.channels()),
+
+            server: Some(self.server().to_owned()),
+            port: Some(self.port()),
+            .. IrcLibConfig::default()
+        }
+    }
+}
+
 
 impl Default for UserConfig {
     fn default() -> UserConfig {
         UserConfig {
-            nets: HashMap::new(),
+            net: HashMap::new(),
+            password: String::new(),
             alert_cmd: None,
         }
     }

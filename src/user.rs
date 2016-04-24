@@ -14,7 +14,7 @@ use common::types::NetId;
 use common::alert::Alert;
 
 use network::IrcNetwork;
-use config::{UserConfig, IrcNetConfig};
+use config::{UserConfig, NetConfig};
 use handle::{BaseUpdateHandle};
 
 
@@ -39,14 +39,14 @@ impl UserState {
 
     pub fn from_cfg(wake: Notifier, cfg: UserConfig) -> UserState {
         let mut us = Self::new(wake);
-        for (name, net_cfg) in cfg.nets.iter() {
+        for (name, net_cfg) in cfg.net.iter() {
             us.add_server(&name, net_cfg);
         }
         us.cfg = cfg;
         us
     }
 
-    fn add_server(&mut self, name: &str, cfg: &IrcNetConfig) {
+    fn add_server(&mut self, name: &str, cfg: &NetConfig) {
         self.networks.insert(name.to_owned(), IrcNetwork::new(name, cfg));
     }
 

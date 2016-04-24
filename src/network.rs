@@ -10,7 +10,7 @@ use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
 use common::line::{Sender, User, LineData, MsgKind};
 use common::types::NetId;
 
-use config::IrcNetConfig;
+use config::NetConfig;
 use buffer::Buffer;
 use handle::UpdateHandle;
 
@@ -18,14 +18,14 @@ use handle::UpdateHandle;
 /// connection.
 pub struct IrcNetwork {
     name: NetId,
-    cfg: IrcNetConfig,
+    cfg: NetConfig,
     conn: Option<(IrcServer, Receiver<Message>)>,
     // serv_buf: Buffer,
     bufs: HashMap<BufTarget, Buffer>,
 }
 
 impl IrcNetwork {
-    pub fn new(name: &str, cfg: &IrcNetConfig) -> IrcNetwork {
+    pub fn new(name: &str, cfg: &NetConfig) -> IrcNetwork {
         IrcNetwork {
             name: name.to_owned(),
             cfg: cfg.clone(),
@@ -38,7 +38,7 @@ impl IrcNetwork {
     /// Attempts to connect to the IRC network.
     pub fn connect(&mut self, notif: Notifier) -> io::Result<()> {
         info!("Connecting to IRC network");
-        let c = try!(IrcServer::from_config(self.cfg.irc.clone()));
+        let c = try!(IrcServer::from_config(self.cfg.irc_config()));
         let (tx, rx) = channel();
         let c2 = c.clone();
         thread::spawn(move || {

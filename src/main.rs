@@ -57,7 +57,7 @@ fn main() {
 
     debug!("Creating context.");
     let mut ctx = Context::new(notif);
-    for (uid, ucfg) in cfg.users.iter() {
+    for (uid, ucfg) in cfg.user.iter() {
         ctx.add_user(uid, ucfg.clone());
     }
 
