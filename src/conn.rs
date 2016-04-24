@@ -333,6 +333,13 @@ impl Machine for Updater {
             if !user.clients.0.is_empty() {
                 let alerts = user.state.take_alerts();
                 user.clients.broadcast(&CoreMsg::Alerts(alerts));
+            } else if let Some(ref cmd) = user.state.cfg.alert_cmd.clone() {
+                use std::process::Command;
+                for alert in user.state.take_alerts() {
+                    let cmd = cmd.replace("%m", &alert.msg);
+                    info!("Sending alert with command {}", cmd);
+                    Command::new("/bin/sh").arg("-c").arg(cmd).spawn().expect("Failed to spawn alert command");
+                }
             }
         }
         Response::ok(self)

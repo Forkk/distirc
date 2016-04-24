@@ -5,6 +5,7 @@
 // use std::sync::mpsc::{channel};
 use std::collections::HashMap;
 use std::collections::hash_map;
+use std::default::Default;
 use irc::client::prelude::*;
 use rotor::Notifier;
 
@@ -19,6 +20,7 @@ use handle::{BaseUpdateHandle};
 
 // #[derive(Debug)]
 pub struct UserState {
+    pub cfg: UserConfig,
     networks: HashMap<NetId, IrcNetwork>,
     wake: Notifier,
     /// Queue for alerts that happened while no client was connected.
@@ -26,8 +28,9 @@ pub struct UserState {
 }
 
 impl UserState {
-    pub fn new(wake: Notifier) -> UserState {
+    fn new(wake: Notifier) -> UserState {
         UserState {
+            cfg: UserConfig::default(),
             networks: HashMap::new(),
             wake: wake,
             alerts: vec![],
@@ -39,6 +42,7 @@ impl UserState {
         for (name, net_cfg) in cfg.nets.iter() {
             us.add_server(&name, net_cfg);
         }
+        us.cfg = cfg;
         us
     }
 

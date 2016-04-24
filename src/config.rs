@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::collections::HashMap;
+use std::default::Default;
 use toml;
 use toml::Parser;
 use irc::client::prelude::Config;
@@ -46,10 +47,21 @@ pub struct ChatConfig {
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct UserConfig {
     pub nets: HashMap<NetId, IrcNetConfig>,
+    /// Command to run when there are no clients to send alerts to.
+    pub alert_cmd: Option<String>,
 }
 
 /// Represents the configuration for a network.
 #[derive(Debug, Clone, RustcEncodable, RustcDecodable)]
 pub struct IrcNetConfig {
     pub irc: Config,
+}
+
+impl Default for UserConfig {
+    fn default() -> UserConfig {
+        UserConfig {
+            nets: HashMap::new(),
+            alert_cmd: None,
+        }
+    }
 }
