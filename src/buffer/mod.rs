@@ -116,6 +116,16 @@ impl Buffer {
         self.topic = topic;
     }
 
+    /// Sets whether we're joined in this buffer or not and sends a status update.
+    pub fn set_joined<U>(&mut self, joined: bool, u: &mut U)
+        where U : UpdateHandle<CoreBufMsg>
+    {
+        self.joined = joined;
+        u.send_msg(CoreBufMsg::State {
+            joined: joined,
+        })
+    }
+
 
     pub fn user_msg<U>(&mut self, user: &User, msg: &Message, my_nick: &str, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
@@ -124,7 +134,7 @@ impl Buffer {
             Command::JOIN(_, _, _) => {
                 if user.nick == my_nick {
                     info!("Joined channel {}", self.id.name());
-                    self.joined = true;
+                    self.set_joined(true, u);
                 } else {
                     debug!("User {} joined channel {}", user.nick, self.id.name());
                     self.users.insert(user.nick.clone());
@@ -136,7 +146,7 @@ impl Buffer {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
                 if user.nick == my_nick {
                     info!("Parted channel {}", self.id.name());
-                    self.joined = false;
+                    self.set_joined(false, u);
                     self.users.clear();
                 } else {
                     debug!("User {} left channel {}", user.nick, self.id.name());
@@ -152,7 +162,7 @@ impl Buffer {
                 let reason = reason.clone().unwrap_or("No reason given".to_owned());
                 if target == my_nick {
                     info!("Kicked from channel {} by {:?}", self.id.name(), user);
-                    self.joined = false;
+                    self.set_joined(false, u);
                     self.users.clear();
                 } else {
                     debug!("User {} kicked from channel {}", user.nick, self.id.name());
@@ -234,6 +244,6 @@ impl Buffer {
 impl Buffer {
     /// Gets `BufInfo` data for this buffer.
     pub fn as_info(&self) -> BufInfo {
-        BufInfo { id: self.id.clone() }
+        BufInfo { id: self.id.clone(), joined: self.joined }
     }
 }

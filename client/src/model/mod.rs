@@ -77,9 +77,10 @@ impl CoreModel {
     }
 
     /// Creates a buffer for the given `NetId` and `BufInfo`.
-    fn create_remote_buf(&mut self, nid: NetId, buf: BufInfo) {
-        let key = BufKey::from_targ(nid, buf.id);
-        self.get_or_create(key);
+    fn create_remote_buf(&mut self, nid: NetId, info: BufInfo) {
+        let key = BufKey::from_targ(nid, info.id);
+        let buf = self.get_or_create(key);
+        buf.borrow_mut().set_joined(info.joined);
     }
 
 
@@ -105,7 +106,21 @@ impl CoreModel {
 
     /// Sends a privmsg to the destination channel.
     pub fn send_privmsg(&mut self, key: &BufKey, msg: String) {
-        self.send_buf(key, ClientBufMsg::SendMsg(msg));
+        if self.get(key).map_or(false, |b| b.borrow().joined()) {
+            self.send_buf(key, ClientBufMsg::SendMsg(msg));
+        } else {
+            match key {
+                key @ &BufKey::Channel(_, _) => {
+                    self.status(format!("Can't send to channel {}: not joined", key));
+                },
+                key @ &BufKey::Private(_, _) => {
+                    self.status(format!("Can't send to user {}: not online", key));
+                },
+                _ => {
+                    self.status(format!("Can't send to channel {}: invalid target", key));
+                },
+            }
+        }
     }
 
     /// Asks the core to join the given channel
@@ -229,7 +244,7 @@ impl CoreModel {
     }
 
     fn handle_buf_msg(&mut self, key: BufKey, msg: CoreBufMsg) {
-        let (__buf, bs) = match self.bufs.get_mut(&key) {
+        let (buf, bs) = match self.bufs.get_mut(&key) {
             Some(&mut BufEntry { ref mut buf, sender: Some(ref mut bs)}) => (buf, bs),
             _ => {
                 error!("Ignoring message for unknown buffer: {:?}", key);
@@ -239,6 +254,7 @@ impl CoreModel {
 
         match msg {
             CoreBufMsg::State { joined } => {
+                buf.borrow_mut().set_joined(joined);
                 if joined {
                     self.status = Some(format!("Joined channel {}", key));
                 } else {

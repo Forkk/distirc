@@ -49,6 +49,10 @@ pub struct Buffer {
     front: Vec<BufferLine>,
     /// Scrollback lines in reverse order. The first of these is at index -1.
     back: Vec<BufferLine>,
+    /// True if we've joined this channel.
+    ///
+    /// For private message buffers, this indicates whether the user is online.
+    joined: bool,
 }
 
 impl Buffer {
@@ -69,12 +73,22 @@ impl Buffer {
             log_req: 0,
             front: vec![],
             back: vec![],
+            joined: false,
         };
         (buf, sender)
     }
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// True if this buffer is available to send messages to.
+    pub fn joined(&self) -> bool {
+        self.joined
+    }
+
+    pub fn set_joined(&mut self, j: bool) {
+        self.joined = j;
     }
 
     /// Receives new messages from the sender.

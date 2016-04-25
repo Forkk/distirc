@@ -11,6 +11,7 @@ pub struct NetInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BufInfo {
     pub id: BufTarget,
+    pub joined: bool,
 }
 
 impl BufInfo {
