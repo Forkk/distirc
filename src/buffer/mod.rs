@@ -1,15 +1,17 @@
 use std::collections::HashSet;
 use std::env;
-use irc::client::prelude::*;
 use time;
 
 use common::line::{BufferLine, LineData, MsgKind, User};
 use common::messages::{NetId, BufInfo, Alert, BufTarget, CoreBufMsg};
 
+use network::BufferCmd;
+
 mod log;
 
 use handle::UpdateHandle;
 use self::log::BufferLog;
+
 
 /// A buffer within a network.
 #[derive(Debug, Clone)]
@@ -117,7 +119,7 @@ impl Buffer {
     }
 
     /// Sets whether we're joined in this buffer or not and sends a status update.
-    pub fn set_joined<U>(&mut self, joined: bool, u: &mut U)
+    fn set_joined<U>(&mut self, joined: bool, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
     {
         self.joined = joined;
@@ -125,86 +127,113 @@ impl Buffer {
             joined: joined,
         })
     }
+}
 
-
-    pub fn user_msg<U>(&mut self, user: &User, msg: &Message, my_nick: &str, u: &mut U)
+/// IRC Message Handling
+impl Buffer {
+    pub fn handle_cmd<U>(&mut self, cmd: BufferCmd, my_nick: &str, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
     {
-        match msg.command {
-            Command::JOIN(_, _, _) => {
+        use network::BufferCmd::*;
+        match cmd {
+            JOIN(user) => {
                 if user.nick == my_nick {
-                    info!("Joined channel {}", self.id.name());
+                    debug!("Joined channel {}", self.id.name());
                     self.set_joined(true, u);
                 } else {
-                    debug!("User {} joined channel {}", user.nick, self.id.name());
+                    debug!("User {} joined channel {}", user, self.id.name());
                     self.users.insert(user.nick.clone());
                     trace!("Users: {:?}", self.users);
                 }
-                self.push_line(LineData::Join { user: user.clone() }, u)
-            }
-            Command::PART(_, ref reason) => {
-                let reason = reason.clone().unwrap_or("No reason given".to_owned());
+
+                self.push_line(LineData::Join { user: user }, u)
+            },
+            PART(user, reason) => {
+                let reason = reason.unwrap_or("No reason given".to_owned());
                 if user.nick == my_nick {
-                    info!("Parted channel {}", self.id.name());
+                    debug!("Parted channel {}", self.id.name());
                     self.set_joined(false, u);
                     self.users.clear();
                 } else {
-                    debug!("User {} left channel {}", user.nick, self.id.name());
+                    debug!("User {} left channel {}", user, self.id.name());
                     self.users.remove(&user.nick);
                     trace!("Users: {:?}", self.users);
                 }
+
                 self.push_line(LineData::Part {
-                    user: user.clone(),
+                    user: user,
                     reason: reason,
                 }, u)
-            }
-            Command::KICK(_, ref target, ref reason) => {
-                let reason = reason.clone().unwrap_or("No reason given".to_owned());
-                if target == my_nick {
-                    info!("Kicked from channel {} by {:?}", self.id.name(), user);
+            },
+            KICK { by, targ, reason } => {
+                let reason = reason.unwrap_or("No reason given".to_owned());
+                if targ == my_nick {
+                    debug!("Kicked from channel {} by {}", self.id.name(), by);
                     self.set_joined(false, u);
                     self.users.clear();
                 } else {
-                    debug!("User {} kicked from channel {}", user.nick, self.id.name());
-                    self.users.remove(&user.nick);
+                    debug!("User {} kicked from channel {} by {}", targ, self.id.name(), by);
+                    self.users.remove(&targ);
                     trace!("Users: {:?}", self.users);
                 }
+
                 self.push_line(LineData::Kick {
-                    by: user.clone(),
-                    user: target.clone(),
+                    by: by,
+                    user: targ,
                     reason: reason,
                 }, u)
-            }
-            Command::PRIVMSG(_, ref msg) => {
+            },
+
+            PRIVMSG(user, msg) => {
                 if let BufTarget::Channel(ref bid) = self.id {
+                    // Check if the message pings us.
                     if msg.contains(my_nick) {
                         // Push a ping
                         let msg = format!("Pinged by {} in channel {}", &user.nick, bid);
                         u.post_alert(Alert::ping(self.nid.clone(), bid.clone(), msg));
                     }
                 } else if let BufTarget::Private(ref bid) = self.id {
+                    // If it's a PM, send an alert regardless of the contents.
                     let msg = format!("New private message from {}", &user.nick);
                     u.post_alert(Alert::privmsg(self.nid.clone(), bid.clone(), msg));
                 }
 
                 self.push_line(LineData::Message {
                     kind: MsgKind::PrivMsg,
-                    from: user.nick.clone(),
-                    msg: msg.clone(),
+                    from: user.nick,
+                    msg: msg,
                 }, u)
-            }
-            Command::NOTICE(_, ref msg) => {
+            },
+            NOTICE(user, msg) => {
+                // NOTE: Should we check notices for pings?
                 self.push_line(LineData::Message {
                     kind: MsgKind::Notice,
                     from: user.nick.clone(),
                     msg: msg.clone(),
                 }, u)
+            },
+
+            RPL_NAMREPLY(body) => {
+                if self.names_ended { self.users.clear(); }
+                for name in body.split(' ') {
+                    let name = if name.starts_with("@") || name.starts_with("+") {
+                        &name[1..]
+                    } else {
+                        name
+                    };
+                    self.users.insert(name.to_owned());
+                }
+                trace!("User list update: {:?}", self.users);
+            },
+            RPL_ENDOFNAMES => {
+                trace!("Final user list: {:?}", self.users);
+                self.names_ended = true;
             }
-            _ => {}
         }
     }
 
-    pub fn user_quit<U>(&mut self, user: &User, msg: Option<String>, u: &mut U)
+    /// Handles `user` quitting.
+    pub fn handle_quit<U>(&mut self, user: &User, msg: Option<String>, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
     {
         debug!("User {} quit buffer {}", user.nick, self.id.name());
@@ -214,29 +243,6 @@ impl Buffer {
             msg: msg,
         }, u);
         trace!("Users: {:?}", self.users);
-    }
-
-
-    /// Handles a `RPL_NAMREPLY` message.
-    ///
-    /// If this is the first since the last time `end_names` was called, the
-    /// user list will be cleared first.
-    pub fn handle_names(&mut self, body: &str) {
-        for name in body.split(' ') {
-            let name = if name.starts_with("@") || name.starts_with("+") {
-                &name[1..]
-            } else {
-                name
-            };
-            self.users.insert(name.to_owned());
-        }
-        debug!("User list update: {:?}", self.users);
-    }
-
-    /// Called when the name list ends.
-    pub fn end_names(&mut self) {
-        debug!("Final user list: {:?}", self.users);
-        self.names_ended = true;
     }
 }
 

@@ -233,7 +233,7 @@ impl Client {
                 Action::ok(self)
             },
             ClientNetMsg::JoinChan(ref chan) => {
-                net.join_chan(chan);
+                net.join_chan(chan.clone());
                 Action::ok(self)
             },
         }

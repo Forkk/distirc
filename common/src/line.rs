@@ -1,9 +1,16 @@
 // use irc::client::prelude::*;
+use std::fmt;
 use time;
 use time::{Tm, Timespec};
 use serde::{Serializer, Deserializer};
 
 include!(concat!(env!("OUT_DIR"), "/line.rs"));
+
+impl fmt::Display for User {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "{}!{}@{}", self.nick, self.ident, self.host)
+    }
+}
 
 impl Sender {
     pub fn parse_prefix(pfx: &str) -> Sender {

@@ -7,28 +7,69 @@ use irc::client::prelude::*;
 use rotor::Notifier;
 
 use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
-use common::line::{Sender, User, LineData, MsgKind};
+use common::line::{LineData, MsgKind};
 use common::types::NetId;
 
 use config::NetConfig;
 use buffer::Buffer;
 use handle::UpdateHandle;
 
+mod routing;
+
+pub use self::routing::{RoutedMsg, BufferCmd, NetworkCmd};
+use self::routing::route_message;
+
 /// This struct represents an IRC network and its state, including the
 /// connection.
 pub struct IrcNetwork {
     name: NetId,
     cfg: NetConfig,
+    nick: String,
     conn: Option<(IrcServer, Receiver<Message>)>,
     // serv_buf: Buffer,
     bufs: HashMap<BufTarget, Buffer>,
 }
 
+// External API
+impl IrcNetwork {
+    /// Gets a reference to the given buffer if it exists.
+    pub fn get_buf(&self, targ: &BufTarget) -> Option<&Buffer> {
+        self.bufs.get(targ)
+    }
+
+    /// Gets a handle to the given buffer if it exists.
+    ///
+    /// See `BufHandle`
+    pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<BufHandle<'a>> {
+        let id = self.name.clone();
+        let irc = if let Some((ref mut irc, _)) = self.conn {
+            Some(irc)
+        } else { None };
+        self.bufs.get_mut(targ).map(|buf| {
+            BufHandle {
+                irc: irc,
+                buf: buf,
+                netid: id,
+            }
+        })
+    }
+
+    /// Joins the given channel.
+    pub fn join_chan(&mut self, chan: String) {
+        // TODO: Tell the client who requested the join that we joined it.
+        if let Some((ref mut irc, _)) = self.conn {
+            irc.send(Command::JOIN(chan, None, None)).expect("Failed to send IRC message");
+        }
+    }
+}
+
+// Connection Handling
 impl IrcNetwork {
     pub fn new(name: &str, cfg: &NetConfig) -> IrcNetwork {
         IrcNetwork {
             name: name.to_owned(),
             cfg: cfg.clone(),
+            nick: String::new(),
             conn: None,
             // serv_buf: Buffer::new("server"),
             bufs: HashMap::new(),
@@ -81,7 +122,11 @@ impl IrcNetwork {
             } else {
                 break 'recv;
             };
-            self.handle_msg(m, &nick, &mut net_uh);
+            if nick != self.nick {
+                debug!("Nick updated to {}", nick);
+                self.nick = nick;
+            }
+            self.handle_msg(m, &mut net_uh);
         }
 
         if disconn {
@@ -89,118 +134,69 @@ impl IrcNetwork {
             self.conn = None;
         }
     }
+}
 
-    pub fn handle_msg<U>(&mut self, msg: Message, nick: &str, u: &mut U)
+// Message Handling
+impl IrcNetwork {
+    /// Handles messages from IRC.
+    fn handle_msg<U>(&mut self, msg: Message, u: &mut U)
         where U : UpdateHandle<CoreNetMsg>
     {
-        let pfx = msg.prefix.clone().map(|p| Sender::parse_prefix(&p));
-        match pfx {
-            Some(Sender::User(from)) => self.user_msg(&from, &msg, nick, u),
-            Some(Sender::Server(_)) => {
-                self.server_msg(&msg, u);
+        trace!("Handling IRC message {:?}", msg);
+        match route_message(msg, &self.nick) {
+            Some(RoutedMsg::Network(cmd)) => self.handle_net_cmd(cmd, u),
+            Some(RoutedMsg::Channel(chan, cmd)) => {
+                let nick = self.nick.clone();
+                let buf = self.get_create_buf(BufTarget::Channel(chan), u);
+                let id = buf.id().clone();
+                let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(id.clone(), msg));
+                buf.handle_cmd(cmd, &nick, &mut buf_uh);
             },
-            None => {
-                self.server_msg(&msg, u);
+            Some(RoutedMsg::Private(user, cmd)) => {
+                let nick = self.nick.clone();
+                let buf = self.get_create_buf(BufTarget::Private(user.nick), u);
+                let id = buf.id().clone();
+                let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(id.clone(), msg));
+                buf.handle_cmd(cmd, &nick, &mut buf_uh);
             },
+            None => {},
         }
     }
 
-    fn user_msg<U>(&mut self, user: &User, msg: &Message, nick: &str, u: &mut U)
+    /// Handles network-routed messages.
+    fn handle_net_cmd<U>(&mut self, cmd: NetworkCmd, u: &mut U)
         where U : UpdateHandle<CoreNetMsg>
     {
-        debug!("Handling IRC message {:?}", msg);
-        if let Some(dest) = msg.get_dest() {
-            let targ = if dest.starts_with("#") {
-                // If dest is a channel, route it to that channel's buffer.
-                debug!("Routing message to channel {}", dest);
-                Some(BufTarget::Channel(dest.clone()))
-            } else if dest == nick {
-                // If the message was send directly to us, route it to the
-                // sender's direct message buffer.
-                debug!("Routing message to PM buffer {}", user.nick);
-                Some(BufTarget::Private(user.nick.clone()))
-            } else {
-                None
-            };
-            if let Some(targ) = targ {
-                let mut buf = if !self.bufs.contains_key(&targ) {
-                    let buf = Buffer::new(self.name.clone(), targ.clone());
-                    u.send_msg(CoreNetMsg::Buffers(vec![buf.as_info()]));
-                    self.bufs.entry(targ.clone()).or_insert(buf)
-                } else { self.bufs.get_mut(&targ).unwrap() };
-
-                let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
-                buf.user_msg(user, msg, nick, &mut buf_uh);
-            }
-        } else {
-            match msg.command {
-                Command::QUIT(ref quitmsg) => {
-                    for (targ, ref mut buf) in self.bufs.iter_mut() {
-                        if buf.has_user(&user.nick) {
-                            let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
-                            buf.user_quit(user, quitmsg.clone(), &mut buf_uh);
-                        }
+        use self::routing::NetworkCmd::*;
+        match cmd {
+            QUIT(user, reason) => {
+                for (targ, ref mut buf) in self.bufs.iter_mut() {
+                    if buf.has_user(&user.nick) {
+                        let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
+                        buf.handle_quit(&user, reason.clone(), &mut buf_uh);
                     }
-                },
-                _ => {
-                    error!("Unhandled IRC user message: {:?}", msg);
-                },
-            }
+                }
+            },
+            UnknownCode(code, args, body) => {
+                if let Some(body) = body {
+                    error!("Unknown status code {:?} args: {:?} body: {}", code, args, body);
+                } else {
+                    error!("Unknown status code {:?} args: {:?}", code, args);
+                }
+            },
         }
     }
 
-    fn server_msg<U>(&mut self, msg: &Message, _u: &mut U)
+    /// Returns the given buffer, creating one if it doesn't exist.
+    fn get_create_buf<U>(&mut self, targ: BufTarget, u: &mut U) -> &mut Buffer
         where U : UpdateHandle<CoreNetMsg>
     {
-        use irc::client::data::Response::*;
-        match msg.command {
-            Command::Response(RPL_NAMREPLY, ref args, Some(ref body)) => {
-                if args.len() < 3 {
-                    error!("Invalid RPL_NAMREPLY: {:?}", msg.command);
-                    return;
-                }
-                // The channel is the third arg.
-                let ref chan = args[2];
-                if let Some(ref mut buf) = self.get_buf_mut(&BufTarget::Channel(chan.clone())) {
-                    buf.handle_names(body);
-                }
-            },
-            Command::Response(RPL_ENDOFNAMES, ref args, _) => {
-                // The channel is the third arg.
-                let ref chan = args[1];
-                if let Some(ref mut buf) = self.get_buf_mut(&BufTarget::Channel(chan.clone())) {
-                    buf.end_names();
-                }
-            },
-            _ => {
-                warn!("Unhandled message: {:?}", msg.command);
-            },
-        }
-    }
-
-    pub fn get_buf(&self, targ: &BufTarget) -> Option<&Buffer> {
-        self.bufs.get(targ)
-    }
-
-    pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<BufHandle<'a>> {
-        let id = self.name.clone();
-        let irc = if let Some((ref mut irc, _)) = self.conn {
-            Some(irc)
-        } else { None };
-        self.bufs.get_mut(targ).map(|buf| {
-            BufHandle {
-                irc: irc,
-                buf: buf,
-                netid: id,
-            }
-        })
-    }
-
-    pub fn join_chan(&mut self, chan: &str) {
-        // TODO: Tell the client who requested the join that we joined it.
-        if let Some((ref mut irc, _)) = self.conn {
-            irc.send(Command::JOIN(chan.to_owned(), None, None))
-                .expect("Failed to send IRC message");
+        if !self.bufs.contains_key(&targ) {
+            let buf = Buffer::new(self.name.clone(), targ.clone());
+            u.send_msg(CoreNetMsg::Buffers(vec![buf.as_info()]));
+            self.bufs.entry(targ.clone()).or_insert(buf)
+        } else {
+            self.bufs.get_mut(&targ).unwrap()
         }
     }
 }
@@ -293,26 +289,4 @@ impl<'a> Deref for BufHandle<'a> {
 }
 impl<'a> DerefMut for BufHandle<'a> {
     fn deref_mut(&mut self) -> &mut Self::Target { self.buf }
-}
-
-
-
-/// Extension to `Message` and `Command` for querying a message's destination.
-pub trait DestBufferExt {
-    /// Returns the channel that should handle this message.
-    fn get_dest(&self) -> Option<String>;
-}
-
-impl DestBufferExt for Message {
-    fn get_dest(&self) -> Option<String> {
-        match self.command {
-            Command::JOIN(ref chan, _, _) => Some(chan.clone()),
-            Command::PART(ref chan, _) => Some(chan.clone()),
-            Command::TOPIC(ref chan, _) => Some(chan.clone()),
-            Command::KICK(ref chan, _, _) => Some(chan.clone()),
-            Command::PRIVMSG(ref chan, _) => Some(chan.clone()),
-            Command::NOTICE(ref chan, _) => Some(chan.clone()),
-            _ => None,
-        }
-    }
 }
