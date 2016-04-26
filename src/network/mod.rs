@@ -8,7 +8,7 @@ use rotor::Notifier;
 
 use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
 use common::line::{LineData, MsgKind};
-use common::types::NetId;
+use common::types::{NetId, Nick};
 
 use config::NetConfig;
 use buffer::Buffer;
@@ -42,6 +42,7 @@ impl IrcNetwork {
     /// See `BufHandle`
     pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<BufHandle<'a>> {
         let id = self.name.clone();
+        let nick = self.nick.clone();
         let irc = if let Some((ref mut irc, _)) = self.conn {
             Some(irc)
         } else { None };
@@ -50,15 +51,24 @@ impl IrcNetwork {
                 irc: irc,
                 buf: buf,
                 netid: id,
+                nick: nick,
             }
         })
     }
+
 
     /// Joins the given channel.
     pub fn join_chan(&mut self, chan: String) {
         // TODO: Tell the client who requested the join that we joined it.
         if let Some((ref mut irc, _)) = self.conn {
             irc.send(Command::JOIN(chan, None, None)).expect("Failed to send IRC message");
+        }
+    }
+
+    /// Asks to change to the given nick.
+    pub fn change_nick(&mut self, nick: Nick) {
+        if let Some((ref mut irc, _)) = self.conn {
+            irc.send(Command::NICK(nick)).expect("Failed to send IRC message");
         }
     }
 }
@@ -94,6 +104,7 @@ impl IrcNetwork {
         });
         info!("Sending identification");
         try!(c.identify());
+        self.nick = c.current_nickname().to_owned();
         self.conn = Some((c, rx));
         Ok(())
     }
@@ -108,10 +119,10 @@ impl IrcNetwork {
         });
         let mut disconn = false;
         'recv: loop {
-            let (m, nick) = if let Some((ref conn, ref mut rx)) = self.conn {
+            let m = if let Some((_, ref mut rx)) = self.conn {
                 use std::sync::mpsc::TryRecvError;
                 match rx.try_recv() {
-                    Ok(m) => (m, conn.current_nickname().to_owned()),
+                    Ok(m) => m,
                     Err(TryRecvError::Empty) => break 'recv,
                     Err(TryRecvError::Disconnected) => {
                         warn!("Receiver thread stopped. Disconnecting.");
@@ -122,10 +133,6 @@ impl IrcNetwork {
             } else {
                 break 'recv;
             };
-            if nick != self.nick {
-                debug!("Nick updated to {}", nick);
-                self.nick = nick;
-            }
             self.handle_msg(m, &mut net_uh);
         }
 
@@ -177,6 +184,19 @@ impl IrcNetwork {
                     }
                 }
             },
+            NICK(user, new) => {
+                if user.nick == self.nick {
+                    debug!("Nick changed to {}", new);
+                    self.nick = new.clone();
+                    u.send_msg(CoreNetMsg::NickChanged(new.clone()));
+                }
+                for (targ, ref mut buf) in self.bufs.iter_mut() {
+                    if buf.has_user(&user.nick) {
+                        let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
+                        buf.handle_nick(&user, new.clone(), &mut buf_uh);
+                    }
+                }
+            },
             UnknownCode(code, args, body) => {
                 if let Some(body) = body {
                     error!("Unknown status code {:?} args: {:?} body: {}", code, args, body);
@@ -209,6 +229,7 @@ impl IrcNetwork {
         for (_id, buf) in self.bufs.iter() { bufs.push(buf.as_info()); }
         NetInfo {
             name: self.name.clone(),
+            nick: self.nick.clone(),
             buffers: bufs,
         }
     }
@@ -221,6 +242,7 @@ impl IrcNetwork {
 /// and also provides additional functions for sending messages to the IRC
 /// server.
 pub struct BufHandle<'a> {
+    nick: Nick,
     netid: NetId,
     buf: &'a mut Buffer,
     irc: Option<&'a mut IrcServer>,
@@ -260,7 +282,7 @@ impl<'a> BufHandle<'a> {
 
             self.buf.push_line(LineData::Message {
                 kind: MsgKind::PrivMsg,
-                from: irc.current_nickname().to_owned(),
+                from: self.nick.clone(),
                 msg: msg,
             }, &mut buf_uh);
         }

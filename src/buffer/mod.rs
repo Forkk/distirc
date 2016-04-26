@@ -244,6 +244,20 @@ impl Buffer {
         }, u);
         trace!("Users: {:?}", self.users);
     }
+
+    /// Handles `user` changing nick to `new`.
+    pub fn handle_nick<U>(&mut self, user: &User, new: String, u: &mut U)
+        where U : UpdateHandle<CoreBufMsg>
+    {
+        debug!("User {} changed nick to {} in {:?}", user, new, &self.id);
+        self.users.remove(&user.nick);
+        self.users.insert(new.clone());
+        self.push_line(LineData::Nick {
+            user: user.clone(),
+            new: new,
+        }, u);
+        trace!("Users: {:?}", self.users);
+    }
 }
 
 // Message data

@@ -4,6 +4,8 @@ use time;
 use time::{Tm, Timespec};
 use serde::{Serializer, Deserializer};
 
+use types::Nick;
+
 include!(concat!(env!("OUT_DIR"), "/line.rs"));
 
 impl fmt::Display for User {

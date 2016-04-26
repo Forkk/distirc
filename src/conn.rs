@@ -236,6 +236,10 @@ impl Client {
                 net.join_chan(chan.clone());
                 Action::ok(self)
             },
+            ClientNetMsg::ChangeNick(ref nick) => {
+                net.change_nick(nick.clone());
+                Action::ok(self)
+            },
         }
     }
 

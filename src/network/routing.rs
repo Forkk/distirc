@@ -15,7 +15,6 @@ use common::types::Nick;
 pub enum BufferCmd {
     JOIN(User),
     PART(User, Option<String>),
-    // QUIT(User, Option<String>),
     KICK { by: User, targ: Nick, reason: Option<String> },
 
     PRIVMSG(User, String),
@@ -29,9 +28,8 @@ pub enum BufferCmd {
 /// Represents IRC commands handled by the network object.
 #[derive(Debug, Clone)]
 pub enum NetworkCmd {
-    // NOTE: Quit is in here and `BufferMsg` because the network has to handle
-    // it and send it to all the buffers with the quitting user present.
     QUIT(User, Option<String>),
+    NICK(User, String),
 
     /// Represents an unknown response code.
     ///
@@ -115,6 +113,11 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
             // on which channels the quitting user is in.
             Some(RoutedMsg::Network(NetworkCmd::QUIT(user, msg.clone())))
         },
+        Command::NICK(new) => {
+            let user = try_user!(sender, "NICK").clone();
+            // NICKs have the same situation as QUIT messages.
+            Some(RoutedMsg::Network(NetworkCmd::NICK(user, new)))
+        }
 
 
         Command::Response(Response::RPL_NAMREPLY, args, Some(body)) => {

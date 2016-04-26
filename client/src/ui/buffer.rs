@@ -93,9 +93,12 @@ impl BufferView {
                     self.render_line(y, rb, &time, "<--", &line)
                 },
                 LineData::Kick { ref by, ref user, ref reason } => {
-                    let from = format!("  {0: >1$}", "<--", self.name_col_w);
                     let line = format!("{} was kicked by {} ({})", user, by.nick, reason);
-                    self.render_line(y, rb, &time, &from, &line)
+                    self.render_line(y, rb, &time, "<--", &line)
+                },
+                LineData::Nick { ref user, ref new } => {
+                    let line = format!("{} is now known as {}", user, new);
+                    self.render_line(y, rb, &time, "***", &line)
                 },
             };
             if y > dy {

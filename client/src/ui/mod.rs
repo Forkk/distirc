@@ -193,6 +193,14 @@ impl TermUi {
                     self.status(format!("Not a valid alert ID: {}", args));
                 }
             },
+            "nick" => {
+                let args = args.split(' ').collect::<Vec<_>>();
+                if args.len() == 2 {
+                    self.model.send_nick(args[0].to_owned(), args[1].to_owned());
+                } else {
+                    self.status(format!("Usage: /nick [network] [new nick]"));
+                }
+            },
             _ => {
                 self.status(format!("Unrecognized command: {}", cmd));
             },

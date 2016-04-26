@@ -138,6 +138,11 @@ impl CoreModel {
         self.send_buf(key, ClientBufMsg::FetchLogs(count));
     }
 
+    /// Asks the core to change our nick.
+    pub fn send_nick(&mut self, netid: String, new: String) {
+        self.send_net(&netid, ClientNetMsg::ChangeNick(new));
+    }
+
 
     /// Sends log requests for buffers that need it.
     pub fn send_log_reqs(&mut self) {
@@ -240,6 +245,8 @@ impl CoreModel {
             CoreNetMsg::BufMsg(targ, bmsg) =>
                 self.handle_buf_msg(BufKey::from_targ(nid, targ), bmsg),
             CoreNetMsg::Joined(_) => unimplemented!(),
+            CoreNetMsg::NickChanged(new) =>
+                self.status(format!("You are now known as {}", new)),
         }
     }
 

@@ -46,6 +46,10 @@ pub enum LineData {
         user: User,
         msg: Option<String>,
     },
+    Nick {
+        user: User,
+        new: Nick,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
