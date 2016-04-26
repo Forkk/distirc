@@ -144,6 +144,8 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
             Some(RoutedMsg::Network(cmd))
         },
 
+        // Ignore pings -- the IRC library responds to them for us.
+        Command::PING(_, _) => None,
         _ => {
             error!("Ignoring unrouted message: {:?}", msg);
             None
