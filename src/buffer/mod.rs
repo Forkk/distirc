@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::env;
 use time;
+use rotor_irc::Response;
 
 use common::line::{BufferLine, LineData, MsgKind, User};
 use common::messages::{NetId, BufInfo, Alert, BufTarget, CoreBufMsg};
@@ -229,7 +230,16 @@ impl Buffer {
             RPL_ENDOFNAMES => {
                 trace!("Final user list: {:?}", self.users);
                 self.names_ended = true;
-            }
+            },
+
+            RPL_MOTD(msg) => {
+                // NOTE: Should we check notices for pings?
+                self.push_line(LineData::Message {
+                    kind: MsgKind::Response(Response::RPL_MOTD.to_u16()),
+                    from: "motd".to_owned(),
+                    msg: msg.clone(),
+                }, u)
+            },
         }
     }
 

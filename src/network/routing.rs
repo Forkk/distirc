@@ -22,6 +22,8 @@ pub enum BufferCmd {
 
     RPL_NAMREPLY(String),
     RPL_ENDOFNAMES,
+
+    RPL_MOTD(String),
 }
 
 
@@ -57,6 +59,67 @@ pub enum RoutedMsg {
 }
 
 
+/// Logs an error and returns `None` if the given message doesn't satisfy
+macro_rules! check_args {
+    // Specifies that there must be a body
+    ( $msg: expr; if has body, then $block: block ) => {
+        if $msg.body.is_some() {
+            $block
+        } else {
+            error!("Expected a body for {}. Got: {}", $msg.command, $msg);
+            None
+        }
+    };
+    // Specifies that there must be at least $min args and a body
+    ( $msg: expr; if argc >= $min: expr, and has body, then $block: block ) => {
+        if $msg.args.len() >= $min && $msg.body.is_some() {
+            $block
+        } else {
+            error!("Expected a body and at least {} args for {}. Got: {}", $min, $msg.command, $msg);
+            None
+        }
+    };
+    // Specifies that there must be at least $min args
+    ( $msg: expr; if argc >= $min: expr, then $block: block ) => {
+        if $msg.args.len() >= $min {
+            $block
+        } else {
+            error!("Expected at least {} args for {}. Got: {}", $min, $msg.command, $msg);
+            None
+        }
+    };
+    // Specifies that there must be exactly $argc args and a body
+    ( $msg: expr; if argc == $argc: expr, and has body, then $block: block ) => {
+        if $msg.args.len() == $argc && $msg.body.is_some() {
+            $block
+        } else {
+            error!("Expected a body and exactly {} args for {}. Got: {}", $argc, $msg.command, $msg);
+            None
+        }
+    };
+    // Specifies that there must be exactly $argc args
+    ( $msg: expr; if argc == $argc: expr, then $block: block ) => {
+        if $msg.args.len() == $argc {
+            $block
+        } else {
+            error!("Expected exactly {} args for {}. Got: {}", $argc, $msg.command, $msg);
+            None
+        }
+    };
+    // Specifies that there must be exactly $argc args **or** a body.
+    ( $msg: expr; if argc == $argc: expr, then $argblock: block else if has body $bodyblock: block ) => {
+        if $msg.args.len() == $argc {
+            $argblock
+        } else if $msg.body.is_some() {
+            $bodyblock
+        } else {
+            error!("Expected a body or exactly {} args for {}. Got: {}", $argc, $msg.command, $msg);
+            None
+        }
+    };
+}
+
+
 /// Logs an error and returns if the given sender isn't a user.
 ///
 /// The second argument is used as a message name for logging the error message.
@@ -86,33 +149,28 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
 
     match msg.command.clone() {
         Command::JOIN => {
-            if let Some(ref chan) = msg.body {
-                let user = try_user!(sender, "JOIN").clone();
-                let bc = BufferCmd::JOIN(user.clone());
-                route_target(chan.clone(), user, cur_nick, bc)
-            } else if msg.args.len() == 1 {
+            check_args!(msg; if argc == 1, then {
                 let user = try_user!(sender, "JOIN").clone();
                 let chan = msg.args[0].clone();
                 let bc = BufferCmd::JOIN(user.clone());
                 route_target(chan.clone(), user, cur_nick, bc)
-            } else {
-                error!("Expected body or 1 arg for JOIN. Got: {}", msg);
-                None
-            }
+            } else if has body {
+                let user = try_user!(sender, "JOIN").clone();
+                let chan = msg.body.unwrap();
+                let bc = BufferCmd::JOIN(user.clone());
+                route_target(chan.clone(), user, cur_nick, bc)
+            })
         },
         Command::PART => {
-            if msg.args.len() == 1 {
+            check_args!(msg; if argc == 1, then {
                 let user = try_user!(sender, "PART").clone();
                 let chan = msg.args[0].clone();
                 let bc = BufferCmd::PART(user.clone(), msg.body);
                 route_target(chan, user, cur_nick, bc)
-            } else {
-                error!("Expected 1 arg for PART. Got: {}", msg);
-                None
-            }
+            })
         },
         Command::KICK => {
-            if msg.args.len() == 2 {
+            check_args!(msg; if argc == 2, then {
                 let user = try_user!(sender, "KICK").clone();
                 let chan = msg.args[0].clone();
                 let targ = msg.args[1].clone();
@@ -122,26 +180,20 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
                     reason: msg.body,
                 };
                 route_target(chan, user, cur_nick, bc)
-            } else {
-                error!("Expected 2 args for KICK. Got: {}", msg);
-                None
-            }
+            })
         },
 
         Command::PRIVMSG => {
-            if msg.args.len() == 1 && msg.body.is_some() {
+            check_args!(msg; if argc == 1, and has body, then {
                 let user = try_user!(sender, "PRIVMSG").clone();
                 let dest = msg.args[0].clone();
                 let message = msg.body.unwrap();
                 let bc = BufferCmd::PRIVMSG(user.clone(), message);
                 route_target(dest, user, cur_nick, bc)
-            } else {
-                error!("Expected 1 arg and body for PRIVMSG. Got: {}", msg);
-                None
-            }
+            })
         },
         Command::NOTICE => {
-            if msg.args.len() == 1 && msg.body.is_some() {
+            check_args!(msg; if argc == 1, and has body, then {
                 let sender = if sender.is_none() {
                     error!("Expected a prefix for NOTICE. Args: {:?}", msg.args);
                     return None;
@@ -155,10 +207,7 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
                     Sender::User(u) => route_target(dest, u, cur_nick, bc),
                     Sender::Server(_) => Some(RoutedMsg::NetBuffer(bc)),
                 }
-            } else {
-                error!("Expected 1 arg and body for NOTICE. Got: {}", msg);
-                None
-            }
+            })
         },
 
         Command::QUIT => {
@@ -168,48 +217,48 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
             Some(RoutedMsg::Network(NetworkCmd::QUIT(user, msg.body)))
         },
         Command::NICK => {
-            if msg.args.len() == 1 {
+            check_args!(msg; if argc == 1, then {
                 let user = try_user!(sender, "NICK").clone();
                 let new = msg.args[0].clone();
                 // NICKs have the same situation as QUIT messages.
                 Some(RoutedMsg::Network(NetworkCmd::NICK(user, new)))
-            } else {
-                error!("Expected 1 arg for NICK. Got: {}", msg);
-                None
-            }
+            })
         }
 
 
         Command::Response(RPL_NAMREPLY) => {
-            if msg.args.len() != 3 || msg.body.is_none() {
-                error!("Expected 3 args and a body to RPL_NAMREPLY. Got: {}", msg);
-                return None;
-            }
-            // The channel is the third arg. I don't know what the other args
-            // are, but they probably don't matter...
-            let chan = msg.args[2].clone();
-            let body = msg.body.unwrap();
-            let bc = BufferCmd::RPL_NAMREPLY(body);
-            Some(RoutedMsg::Channel(chan, bc))
+            check_args!(msg; if argc == 3, and has body, then {
+                // The channel is the third arg. I don't know what the other args
+                // are, but they probably don't matter...
+                let chan = msg.args[2].clone();
+                let body = msg.body.unwrap();
+                let bc = BufferCmd::RPL_NAMREPLY(body);
+                Some(RoutedMsg::Channel(chan, bc))
+            })
         },
         Command::Response(RPL_ENDOFNAMES) => {
-            if msg.args.len() >= 1 {
-                error!("Expected at least 1 arg to RPL_ENDOFNAMES. Got: {}", msg);
-                return None;
-            }
-            // The channel is the third arg.
-            let chan = msg.args[1].clone();
-            let bc = BufferCmd::RPL_ENDOFNAMES;
-            Some(RoutedMsg::Channel(chan, bc))
+            check_args!(msg; if argc >= 1, then {
+                // The channel is the third arg.
+                let chan = msg.args[1].clone();
+                let bc = BufferCmd::RPL_ENDOFNAMES;
+                Some(RoutedMsg::Channel(chan, bc))
+            })
         },
 
         Command::Response(RPL_MYINFO) => {
-            if msg.args.len() < 1 {
-                error!("Expected at least 1 arg to RPL_MYINFO. Got: {}", msg);
-                None
-            } else {
+            check_args!(msg; if argc >= 1, then {
                 Some(RoutedMsg::Network(NetworkCmd::RPL_MYINFO(msg.args[0].clone())))
-            }
+            })
+        },
+
+        // These are all turned into RPL_MOTD buffer commands, since they're
+        // mostly the same and don't really warrant additional buffer commands.
+        Command::Response(RPL_MOTDSTART) |
+        Command::Response(RPL_ENDOFMOTD) |
+        Command::Response(RPL_MOTD) => {
+            check_args!(msg; if has body, then {
+                Some(RoutedMsg::NetBuffer(BufferCmd::RPL_MOTD(msg.body.unwrap())))
+            })
         },
 
         Command::Response(code) => {
