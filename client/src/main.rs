@@ -4,31 +4,42 @@ extern crate env_logger;
 extern crate rotor_stream;
 extern crate rustbox;
 extern crate time;
+extern crate rustc_serialize;
+extern crate toml;
+extern crate xdg;
 
 extern crate common;
 
 use std::sync::Mutex;
-use std::net::SocketAddr;
+use std::net::ToSocketAddrs;
 use log::{Log, LogLevelFilter, LogRecord, LogMetadata, MaxLogLevelFilter};
 
 use common::line::{BufferLine, LineData, MsgKind};
+use common::messages::Password;
 
 pub mod ui;
 pub mod model;
 pub mod conn;
+pub mod config;
 
 use self::ui::TermUi;
 use self::conn::ConnThread;
 use self::model::{Buffer, BufSender, BufKey};
+use self::config::read_config;
 
 fn main() {
+    let cfg = read_config();
+
     // env_logger::init().expect("Failed to initialize logger");
     let (buf, bs) = Buffer::new(BufKey::Status);
     ClientLogger::init(bs, LogLevelFilter::Trace);
     info!("Hello! Welcome to distirc's terminal client.");
 
-    let addr = "127.0.0.1:4242".parse::<SocketAddr>().unwrap();
-    let conn = ConnThread::spawn(addr);
+    let addr = (&cfg.core.host[..], cfg.core.port).to_socket_addrs()
+        .unwrap().into_iter().next().unwrap();
+
+    let pass = Password(cfg.core.pass.clone());
+    let conn = ConnThread::spawn(addr, cfg.core.user.clone(), pass);
 
     let mut ui = TermUi::new(buf, conn).expect("Failed to initialize UI");
     ui.main();

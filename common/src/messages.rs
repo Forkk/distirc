@@ -1,3 +1,5 @@
+use std::fmt;
+
 pub use self::core::{CoreMsg, CoreNetMsg, CoreBufMsg};
 pub use self::client::{ClientMsg, ClientNetMsg, ClientBufMsg};
 

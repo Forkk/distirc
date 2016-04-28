@@ -225,6 +225,9 @@ impl CoreModel {
             CoreMsg::BufMsg(bid, bmsg) => self.handle_buf_msg(BufKey::Global(bid), bmsg),
             CoreMsg::Alerts(mut alerts) => self.alerts.append(&mut alerts),
             CoreMsg::Status(msg) => self.status(msg),
+            CoreMsg::AuthOk | CoreMsg::AuthErr => {
+                error!("Got unexpected authentication response message during connection");
+            }
         }
     }
 

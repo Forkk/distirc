@@ -17,8 +17,8 @@ use super::{Context, User, UserClients, UserClient};
 
 /// This machine handles a client's state.
 pub enum Client {
-    // /// The client has just connected and hasn't authenticated yet.
-    // Connecting,
+    /// The client has just connected and hasn't authenticated yet.
+    Authing,
     /// The client has authenticated as a user.
     Connected {
         uid: UserId,
@@ -33,50 +33,69 @@ pub struct ClientBuf {
     last_sent_idx: isize,
 }
 
+impl Client {
+    fn handle_auth_msgs(msg: &ClientMsg, s: &mut Scope<Context>) -> Action<Self> {
+        if let &ClientMsg::Authenticate(ref uid, ref pass) = msg {
+            let notif = s.notifier();
+            let usr = match s.users.get_mut(uid) {
+                Some(u) => u,
+                None => {
+                    error!("Unknown user state: {}", uid);
+                    return Action::done();
+                },
+            };
+            if &usr.state.cfg.password == &pass.0 {
+                info!("Client authenticated successfully as {}", uid);
+                let (tx, rx) = channel();
+
+                usr.clients.0.push(UserClient {
+                    wake: notif,
+                    tx: tx,
+                });
+
+                // Send the networks list.
+                let mut nets = vec![];
+                for (_nid, net) in usr.state.iter_nets() {
+                    nets.push(net.to_info());
+                }
+
+                let me = Client::Connected {
+                    uid: uid.to_owned(),
+                    rx: rx,
+                    bufs: HashMap::new(),
+                };
+                Action::ok(me)
+                    .send(CoreMsg::AuthOk)
+                    .send(CoreMsg::Networks(nets))
+            } else {
+                Action::ok(Client::Authing).send(CoreMsg::AuthErr)
+            }
+        } else {
+            error!("Client failed to send authentication request during auth phase. Aborting connection");
+            Action::done()
+        }
+    }
+}
+
 
 impl Handler for Client {
     type Context = Context;
+    type Seed = ();
     type Send = CoreMsg;
     type Recv = ClientMsg;
 
-    fn create(s: &mut Scope<Self::Context>) -> Action<Self> {
-        let (tx, rx) = channel();
-
-        let uid = "forkk";
-        let me = Client::Connected{
-            uid: uid.to_owned(),
-            rx: rx,
-            bufs: HashMap::new(),
-        };
-
-        let notif = s.notifier();
-
-        let usr = match s.users.get_mut(uid) {
-            Some(u) => u,
-            None => {
-                error!("Unknown user state: {}", uid);
-                return Action::done();
-            },
-        };
-
-        usr.clients.0.push(UserClient {
-            wake: notif,
-            tx: tx,
-        });
-
-        // Send the networks list.
-        let mut nets = vec![];
-        for (_nid, net) in usr.state.iter_nets() {
-            nets.push(net.to_info());
-        }
-
-        Action::ok(me).send(CoreMsg::Networks(nets))
+    fn create(_seed: (), _s: &mut Scope<Self::Context>) -> Action<Self> {
+        info!("New client connected. Awaiting authentication.");
+        Action::ok(Client::Authing)
     }
 
     /// A message has been received.
     fn msg_recv(self, msg: &Self::Recv, s: &mut Scope<Self::Context>) -> Action<Self> {
         info!("Received message: {:?}", msg);
         match self {
+            Client::Authing => {
+                Self::handle_auth_msgs(msg, s)
+            },
             Client::Connected { uid, rx, bufs } => {
                 let mut user = match s.users.get_mut(&uid) {
                     Some(u) => u,
@@ -86,7 +105,7 @@ impl Handler for Client {
                     },
                 };
                 Client::Connected { uid: uid, rx: rx, bufs: bufs }.handle_user_msg(msg, &mut user)
-            }
+            },
         }
     }
 
@@ -98,6 +117,10 @@ impl Handler for Client {
     fn wakeup(self, s: &mut Scope<Self::Context>) -> Action<Self> {
         trace!("Client woke up");
         match self {
+            Client::Authing => {
+                warn!("Client was woken up during authentication phase");
+                Action::ok(self)
+            },
             Client::Connected { uid, rx, mut bufs } => {
                 // Send new messages to the client.
                 let mut msgs = vec![];
@@ -153,6 +176,10 @@ impl Client {
 
                 Action::ok(self).send(CoreMsg::Networks(nets))
             },
+            ClientMsg::Authenticate(_, _) => {
+                error!("Authenticated client sent auth request. Ignoring.");
+                Action::ok(self)
+            }
         }
     }
 
@@ -189,7 +216,10 @@ impl Client {
     {
         match *msg {
             ClientBufMsg::FetchLogs(count) => {
-                let Client::Connected { mut bufs, rx, uid } = self;
+                let (mut bufs, rx, uid) = if let Client::Connected { bufs, rx, uid } = self {
+                    (bufs, rx, uid)
+                } else { unreachable!(); };
+
                 let lines = {
                     let mut cb = bufs.entry(buf.id().clone()).or_insert_with(|| {
                         error!("Missing `ClientBuf` entry for {:?}. Scrollback will probably be sent incorrectly.",

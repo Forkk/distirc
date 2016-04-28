@@ -5,7 +5,7 @@ use rotor::{Scope, Loop, Config as LoopCfg, Notifier};
 use rotor_stream::Persistent;
 
 use common::conn::{Action, Handler, Connection};
-use common::messages::{CoreMsg, ClientMsg};
+use common::messages::{CoreMsg, ClientMsg, Password};
 
 
 /// Handle for communicating with the connection thread.
@@ -19,7 +19,7 @@ pub struct ConnThread {
 
 impl ConnThread {
     /// Spawns a connection to the given address.
-    pub fn spawn(addr: SocketAddr) -> ConnThread {
+    pub fn spawn(addr: SocketAddr, user: String, pass: Password) -> ConnThread {
         // sender/receiver for messages to the server
         let (txs, txr) = channel();
         // sender/receiver for messages from the server
@@ -33,7 +33,7 @@ impl ConnThread {
         let mut mkloop = Loop::new(&LoopCfg::new()).unwrap();
         mkloop.add_machine_with(|scope| {
             notif = Some(scope.notifier());
-            Persistent::<Connection<ConnHandler>>::connect(scope, addr, ())
+            Persistent::<Connection<Conn>>::connect(scope, addr, (user, pass))
         }).expect("Failed to add connection state machine");
 
         thread::Builder::new()
@@ -66,9 +66,29 @@ struct ConnCtx {
     txr: Receiver<ClientMsg>,
 }
 
-struct ConnHandler;
+enum Conn {
+    Auth,
+    Conn,
+}
 
-impl ConnHandler {
+impl Conn {
+    fn handle_auth_reply(msg: &CoreMsg, _s: &mut Scope<ConnCtx>) -> Action<Self> {
+        match *msg {
+            CoreMsg::AuthOk => {
+                info!("Authenticated successfully");
+                Action::ok(Conn::Conn)
+            },
+            CoreMsg::AuthErr => {
+                error!("Failed to authenticate");
+                Action::done()
+            },
+            ref m => {
+                error!("Received invalid message during auth phase: {:?}", m);
+                Action::done()
+            }
+        }
+    }
+
     fn send_messages(self, scope: &mut Scope<ConnCtx>) -> Action<Self> {
         debug!("Sending new messages");
         let mut act = Action::ok(self);
@@ -86,19 +106,27 @@ impl ConnHandler {
     }
 }
 
-impl Handler for ConnHandler {
+impl Handler for Conn {
     type Context = ConnCtx;
+    type Seed = (String, Password);
     type Send = ClientMsg;
     type Recv = CoreMsg;
 
-    fn create(_scope: &mut Scope<Self::Context>) -> Action<Self> {
+    fn create(seed: Self::Seed, _scope: &mut Scope<Self::Context>) -> Action<Self> {
         info!("Created connection handler");
-        Action::ok(ConnHandler)
+        Action::ok(Conn::Auth).send(ClientMsg::Authenticate(seed.0, seed.1))
     }
 
     fn msg_recv(self, msg: &Self::Recv, scope: &mut Scope<Self::Context>) -> Action<Self> {
-        scope.rxs.send(msg.clone()).unwrap();
-        Action::ok(self)
+        match self {
+            Conn::Conn => {
+                scope.rxs.send(msg.clone()).unwrap();
+                Action::ok(self)
+            },
+            Conn::Auth => {
+                Self::handle_auth_reply(msg, scope)
+            },
+        }
     }
 
     fn timeout(self, _scope: &mut Scope<Self::Context>) -> Action<Self> {
@@ -106,7 +134,11 @@ impl Handler for ConnHandler {
     }
 
     fn wakeup(self, scope: &mut Scope<Self::Context>) -> Action<Self> {
-        // On wakeup, check for any messages to send and send them.
-        self.send_messages(scope)
+        if let Conn::Conn = self {
+            // On wakeup, check for any messages to send and send them.
+            self.send_messages(scope)
+        } else {
+            unreachable!("Woke to send messages up during auth phase");
+        }
     }
 }

@@ -18,10 +18,11 @@ pub type ConnStream<H> = Stream<Connection<H>>;
 /// Trait for state machines that handle distirc messages.
 pub trait Handler: Sized {
     type Context;
-    type Send: Sized + Serialize;
-    type Recv: Sized + Deserialize;
+    type Seed : Sized;
+    type Send : Sized + Serialize;
+    type Recv : Sized + Deserialize;
 
-    fn create(scope: &mut Scope<Self::Context>) -> Action<Self>;
+    fn create(seed: Self::Seed, scope: &mut Scope<Self::Context>) -> Action<Self>;
 
     /// A message has been received.
     fn msg_recv(self, msg: &Self::Recv, scope: &mut Scope<Self::Context>) -> Action<Self>;
@@ -115,10 +116,10 @@ impl<H : Handler> Connection<H> {
 impl<H : Handler> Protocol for Connection<H> {
     type Context = <H as Handler>::Context;
     type Socket = TcpStream;
-    type Seed = ();
+    type Seed = H::Seed;
 
-    fn create(_seed: (), _sock: &mut TcpStream, scope: &mut Scope<Self::Context>) -> Intent<Self> {
-        let act = H::create(scope);
+    fn create(seed: Self::Seed, _sock: &mut TcpStream, scope: &mut Scope<Self::Context>) -> Intent<Self> {
+        let act = H::create(seed, scope);
         match act.machine {
             Ok(fsm) => {
                 let mut conn = Connection {

@@ -44,6 +44,23 @@ impl BufTarget {
 }
 
 
+/// Wrapper for password strings which doesn't print passwords in `format!`.
+#[derive(Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Password(pub String);
+
+impl fmt::Debug for Password {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "\"hunter2\"")
+    }
+}
+
+impl fmt::Display for Password {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        write!(f, "hunter2")
+    }
+}
+
+
 // Message types
 
 mod core {
@@ -55,6 +72,14 @@ mod core {
     /// Messages sent from the core.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum CoreMsg {
+        /// Indicates the core has accepted the client's authentication and the
+        /// connection can proceed.
+        AuthOk,
+
+        /// Indicates the client has failed to authenticate and the connection
+        /// should be aborted.
+        AuthErr,
+
         /// This message tells the client about a list of networks and their buffers.
         Networks(Vec<NetInfo>),
 
@@ -122,10 +147,16 @@ mod core {
 
 mod client {
     use types::{NetId, BufId, Nick};
-    use super::BufTarget;
+    use super::{BufTarget, Password};
     /// Messages sent from the client.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum ClientMsg {
+        /// Attempts to authenticate the client as the given user with the given
+        /// password. This should be the first message sent. Any message sent
+        /// before an `AuthOk` response is received is an error and will cause
+        /// the connection to be dropped.
+        Authenticate(String, Password),
+
         /// Wrapper for messages about a network.
         NetMsg(NetId, ClientNetMsg),
 

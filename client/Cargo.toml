@@ -8,9 +8,12 @@ authors = ["Forkk <forkk@forkk.net>"]
 [dependencies]
 log = "0.3"
 env_logger = "0.3"
+xdg = "2.0"
 time = "0.1"
 rotor = "0.6"
 rotor-stream = "0.6"
+toml = "0.1"
+rustc-serialize = "0.3"
 rustbox = { git = "https://github.com/gchp/rustbox.git" }
 
 [dependencies.common]
