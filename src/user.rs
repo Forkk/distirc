@@ -6,64 +6,42 @@
 use std::collections::HashMap;
 use std::collections::hash_map;
 use std::default::Default;
-use irc::client::prelude::*;
-use rotor::Notifier;
 
-use common::messages::CoreMsg;
 use common::types::NetId;
 use common::alert::Alert;
 
 use network::IrcNetwork;
 use config::{UserConfig, NetConfig};
-use handle::{BaseUpdateHandle};
 
 
 // #[derive(Debug)]
 pub struct UserState {
     pub cfg: UserConfig,
     networks: HashMap<NetId, IrcNetwork>,
-    wake: Notifier,
     /// Queue for alerts that happened while no client was connected.
     alerts: Vec<Alert>,
 }
 
 impl UserState {
-    fn new(wake: Notifier) -> UserState {
+    fn new() -> UserState {
         UserState {
             cfg: UserConfig::default(),
             networks: HashMap::new(),
-            wake: wake,
             alerts: vec![],
         }
     }
 
-    pub fn from_cfg(wake: Notifier, cfg: UserConfig) -> UserState {
-        let mut us = Self::new(wake);
+    pub fn from_cfg(cfg: UserConfig) -> UserState {
+        let mut us = Self::new();
         for (name, net_cfg) in cfg.net.iter() {
-            us.add_server(&name, net_cfg);
+            us.add_network(name.clone(), net_cfg);
         }
         us.cfg = cfg;
         us
     }
 
-    fn add_server(&mut self, name: &str, cfg: &NetConfig) {
+    fn add_network(&mut self, name: String, cfg: &NetConfig) {
         self.networks.insert(name.to_owned(), IrcNetwork::new(name, cfg));
-    }
-
-    pub fn init(&mut self) {
-        for (_, mut net) in self.networks.iter_mut() {
-            net.connect(self.wake.clone()).unwrap(); // FIXME: Handle this error
-        }
-    }
-
-    /// Process messages from servers and clients
-    pub fn update(&mut self, msgs: &mut Vec<CoreMsg>) {
-        let mut u = BaseUpdateHandle::<CoreMsg>::new();
-        for (_, serv) in self.networks.iter_mut() {
-            serv.update(&mut u);
-        }
-        self.alerts.append(&mut u.take_alerts());
-        msgs.append(&mut u.take_msgs());
     }
 
     pub fn iter_nets(&self) -> IterNets {

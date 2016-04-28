@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use std::default::Default;
 use toml;
 use toml::Parser;
-use irc::client::prelude::Config as IrcLibConfig;
 use rustc_serialize::Decodable;
 
 use common::types::NetId;
@@ -89,25 +88,6 @@ impl NetConfig {
     pub fn port(&self) -> u16 { self.port.unwrap_or(6667) }
     pub fn channels(&self) -> Vec<String> {
         self.channels.iter().map(|n| n.clone()).collect()
-    }
-}
-
-
-impl NetConfig {
-    /// Generates an `IrcLibConfig` struct from this config.
-    pub fn irc_config(&self) -> IrcLibConfig {
-        IrcLibConfig {
-            nickname: Some(self.nick().to_owned()),
-            alt_nicks: Some(self.alt_nicks()),
-            nick_password: self.nickserv_pass.clone(),
-            username: Some(self.username().to_owned()),
-            realname: Some(self.realname().to_owned()),
-            channels: Some(self.channels()),
-
-            server: Some(self.server().to_owned()),
-            port: Some(self.port()),
-            .. IrcLibConfig::default()
-        }
     }
 }
 

@@ -224,13 +224,14 @@ impl CoreModel {
             CoreMsg::NetMsg(nid, nmsg) => self.handle_net_msg(nid, nmsg),
             CoreMsg::BufMsg(bid, bmsg) => self.handle_buf_msg(BufKey::Global(bid), bmsg),
             CoreMsg::Alerts(mut alerts) => self.alerts.append(&mut alerts),
+            CoreMsg::Status(msg) => self.status(msg),
         }
     }
 
     fn handle_net_msg(&mut self, nid: NetId, msg: CoreNetMsg) {
         match msg {
-            CoreNetMsg::State { connected } => {
-                if connected {
+            CoreNetMsg::Connection(state) => {
+                if state {
                     self.status(format!("Core connected to network {}", nid));
                 } else {
                     self.status(format!("Core disconnected from network {}", nid));

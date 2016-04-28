@@ -30,6 +30,15 @@ impl Sender {
         }
         Sender::Server(pfx.to_owned())
     }
+
+    /// If this sender is a server, returns its name. If it's a user, returns
+    /// the user's nick.
+    pub fn name(&self) -> &str {
+        match *self {
+            Sender::Server(ref name) => name,
+            Sender::User(ref u) => &u.nick,
+        }
+    }
 }
 
 #[cfg(test)]

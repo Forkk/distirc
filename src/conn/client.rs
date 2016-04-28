@@ -1,9 +1,6 @@
-//! This module implements the server socket.
-
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver, Sender};
-use rotor::{Machine, Response, Scope, EventSet, Notifier};
-use rotor::void::Void;
+use std::sync::mpsc::{channel, Receiver};
+use rotor::Scope;
 
 use common::conn::{Handler, Action};
 use common::messages::{
@@ -11,70 +8,11 @@ use common::messages::{
     ClientMsg, ClientNetMsg, ClientBufMsg,
 };
 
-use user::UserState;
-use config::{UserConfig, UserId};
+use config::UserId;
 use network::{IrcNetwork, BufHandle};
 use handle::BaseUpdateHandle;
 
-
-struct User {
-    state: UserState,
-    clients: UserClients,
-}
-
-struct UserClients(Vec<UserClient>);
-
-impl UserClients {
-    /// Broadcasts the given message to all this user's clients.
-    ///
-    /// As a side-effect, this function will also prune any disconnected clients
-    /// (clients whose `Receiver`) has been `drop`ed.
-    fn broadcast(&mut self, msg: &CoreMsg) {
-        self.0.retain(|client| {
-            if let Err(_) = client.tx.send(msg.clone()) {
-                return false;
-            }
-            client.wake.wakeup().unwrap();
-            true
-        });
-    }
-}
-
-struct UserClient {
-    wake: Notifier,
-    tx: Sender<CoreMsg>,
-}
-
-// #[derive(Debug)]
-pub struct Context {
-    users: HashMap<UserId, User>,
-    /// Notifier to update the users' state.
-    notif: Notifier,
-}
-
-impl Context {
-    pub fn new(notif: Notifier) -> Context {
-        Context {
-            users: HashMap::new(),
-            notif: notif,
-        }
-    }
-
-    pub fn add_user(&mut self, name: &str, cfg: UserConfig) {
-        let state = UserState::from_cfg(self.notif.clone(), cfg);
-        self.users.insert(name.to_owned(), User {
-            state: state,
-            clients: UserClients(vec![]),
-        });
-    }
-
-    /// Initializes users, connecting them to their networks.
-    pub fn init(&mut self) {
-        for (_, ref mut user) in self.users.iter_mut() {
-            user.state.init();
-        }
-    }
-}
+use super::{Context, User, UserClients, UserClient};
 
 
 /// This machine handles a client's state.
@@ -294,58 +232,17 @@ impl Client {
                 Action::ok(self)
             },
             ClientBufMsg::PartChan(ref optmsg) => {
-                buf.part_chan(optmsg);
+                let mut u = BaseUpdateHandle::<CoreMsg>::new();
+                buf.part_chan(optmsg, &mut u);
+                if !u.take_alerts().is_empty() {
+                    // TODO: Implement this
+                    error!("Cannot send alerts in response to client `SendMsg` message");
+                }
+                for msg in u.take_msgs() {
+                    clients.broadcast(&msg);
+                }
                 Action::ok(self)
             },
         }
-    }
-}
-
-
-/// State machine that updates networks when a message is received.
-pub struct Updater;
-
-impl Machine for Updater {
-    type Context = Context;
-    type Seed = ();
-
-    fn create(_seed: (), _s: &mut Scope<Context>) -> Response<Self, Void> {
-        Response::ok(Updater)
-    }
-
-    fn spawned(self, _s: &mut Scope<Context>) -> Response<Self, ()> {
-        Response::ok(self)
-    }
-
-    fn ready(self, _e: EventSet, _s: &mut Scope<Context>) -> Response<Self, ()> {
-        Response::ok(self)
-    }
-
-    fn timeout(self, _s: &mut Scope<Context>) -> Response<Self, ()> {
-        Response::ok(self)
-    }
-
-    fn wakeup(self, scope: &mut Scope<Context>) -> Response<Self, ()> {
-        trace!("Updater woke up");
-        for (_uid, ref mut user) in scope.users.iter_mut() {
-            let mut msgs = vec![];
-            user.state.update(&mut msgs);
-            for msg in msgs {
-                user.clients.broadcast(&msg);
-            }
-
-            if !user.clients.0.is_empty() {
-                let alerts = user.state.take_alerts();
-                user.clients.broadcast(&CoreMsg::Alerts(alerts));
-            } else if let Some(ref cmd) = user.state.cfg.alert_cmd.clone() {
-                use std::process::Command;
-                for alert in user.state.take_alerts() {
-                    let cmd = cmd.replace("%m", &alert.msg);
-                    info!("Sending alert with command {}", cmd);
-                    Command::new("/bin/sh").arg("-c").arg(cmd).spawn().expect("Failed to spawn alert command");
-                }
-            }
-        }
-        Response::ok(self)
     }
 }

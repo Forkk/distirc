@@ -40,6 +40,12 @@ impl Buffer {
         path.push(id.name());
         let mut log = BufferLog::new(path);
 
+        let joined = if let BufTarget::Private(_) = id {
+            true
+        } else {
+            false
+        };
+
         Buffer {
             id: id,
             nid: nid,
@@ -47,7 +53,7 @@ impl Buffer {
             topic: String::new(),
             front: vec![],
             back: log.fetch_lines(),
-            joined: false,
+            joined: joined,
             users: HashSet::new(),
             names_ended: true,
             log: log,
@@ -99,8 +105,8 @@ impl Buffer {
     }
 
 
-    /// Pushes a message into the buffer and posts a `NewLines` message to the
-    /// given message buffer.
+    /// Pushes a message into the buffer and sends a `NewLines` message to the
+    /// given handle.
     pub fn push_line<U>(&mut self, data: LineData, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
     {
@@ -110,12 +116,7 @@ impl Buffer {
         self.front.push(line.clone());
         self.log.write_lines(vec![line.clone()]);
 
-        u.send_msg(CoreBufMsg::NewLines(vec![line]));
-    }
-
-
-    pub fn set_topic(&mut self, topic: String) {
-        self.topic = topic;
+        u.send_clients(CoreBufMsg::NewLines(vec![line]));
     }
 
     /// Sets whether we're joined in this buffer or not and sends a status update.
@@ -123,13 +124,13 @@ impl Buffer {
         where U : UpdateHandle<CoreBufMsg>
     {
         self.joined = joined;
-        u.send_msg(CoreBufMsg::State {
+        u.send_clients(CoreBufMsg::State {
             joined: joined,
         })
     }
 }
 
-/// IRC Message Handling
+// IRC Message Handling
 impl Buffer {
     pub fn handle_cmd<U>(&mut self, cmd: BufferCmd, my_nick: &str, u: &mut U)
         where U : UpdateHandle<CoreBufMsg>
@@ -204,11 +205,11 @@ impl Buffer {
                     msg: msg,
                 }, u)
             },
-            NOTICE(user, msg) => {
+            NOTICE(sender, msg) => {
                 // NOTE: Should we check notices for pings?
                 self.push_line(LineData::Message {
                     kind: MsgKind::Notice,
-                    from: user.nick.clone(),
+                    from: sender.name().to_owned(),
                     msg: msg.clone(),
                 }, u)
             },

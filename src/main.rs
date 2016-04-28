@@ -1,7 +1,7 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate rotor;
 extern crate rotor_stream;
-extern crate irc;
+extern crate rotor_irc;
 extern crate env_logger;
 extern crate rustc_serialize;
 extern crate serde;
@@ -26,12 +26,12 @@ pub mod buffer;
 pub mod conn;
 
 use self::config::read_config;
-use self::conn::{Client, Context, Updater};
+use self::conn::{Client, Context, ConnSpawner};
 
 rotor_compose!{
     pub enum Fsm/Seed<Context> {
         Client(Accept<ConnStream<Client>, TcpListener>),
-        Updater(Updater),
+        Spawner(ConnSpawner),
     }
 }
 
@@ -51,7 +51,7 @@ fn main() {
     let mut notif = None;
     loop_creator.add_machine_with(|scope| {
         notif = Some(scope.notifier());
-        Response::ok(Updater).wrap(Fsm::Updater)
+        Response::ok(Fsm::Spawner(ConnSpawner::Spawner))
     }).expect("Failed to add updater");
     let notif = notif.expect("Notifier was not set.");
 
@@ -62,7 +62,7 @@ fn main() {
     }
 
     debug!("Initializing context.");
-    ctx.init();
+    ctx.spawn_conns();
 
     debug!("Starting");
     loop_creator.run(ctx).unwrap();

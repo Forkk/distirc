@@ -69,15 +69,16 @@ mod core {
 
         /// Lets the client know about some alerts that occurred.
         Alerts(Vec<Alert>),
+
+        /// Tells the client to display the given status message.
+        Status(String),
     }
 
     /// Messages sent from the core about a specific network.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum CoreNetMsg {
-        /// Tells the client about changes in the network's state.
-        State {
-            connected: bool,
-        },
+        /// Tells the client about changes in the network's connection.
+        Connection(bool),
 
         /// Wrapper for messages about a buffer within the network.
         BufMsg(BufTarget, CoreBufMsg),

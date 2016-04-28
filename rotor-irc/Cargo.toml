@@ -1,0 +1,10 @@
+[package]
+name = "rotor-irc"
+version = "0.1.0"
+authors = ["Forkk <forkk@forkk.net>"]
+description = "A simple rotor-based IRC library."
+
+[dependencies]
+log = "0.3"
+rotor = "0.6"
+rotor-stream = "0.6"
