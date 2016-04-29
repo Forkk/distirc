@@ -8,7 +8,7 @@ use common::messages::{
     BufTarget, NetId, BufInfo,
     CoreMsg, CoreBufMsg, CoreNetMsg,
     ClientMsg, ClientNetMsg, ClientBufMsg,
-    Alert,
+    Alert, SendMsgKind,
 };
 
 use conn::ConnThread;
@@ -104,10 +104,21 @@ impl CoreModel {
     }
 
 
-    /// Sends a privmsg to the destination channel.
+    /// Sends a PRIVMSG to the destination channel.
     pub fn send_privmsg(&mut self, key: &BufKey, msg: String) {
+        self.send_joined_buf(key, ClientBufMsg::SendMsg(msg, SendMsgKind::PrivMsg))
+    }
+
+    /// Sends an ACTION to the destination channel.
+    pub fn send_action(&mut self, key: &BufKey, msg: String) {
+        self.send_joined_buf(key, ClientBufMsg::SendMsg(msg, SendMsgKind::Action))
+    }
+
+    /// Sends a message to a buffer as long as it's available (i.e., we've
+    /// joined the channel). If it's unavailable, shows an error message.
+    fn send_joined_buf(&mut self, key: &BufKey, msg: ClientBufMsg) {
         if self.get(key).map_or(false, |b| b.borrow().joined()) {
-            self.send_buf(key, ClientBufMsg::SendMsg(msg));
+            self.send_buf(key, msg);
         } else {
             match key {
                 key @ &BufKey::Channel(_, _) => {

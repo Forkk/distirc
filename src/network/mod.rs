@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::collections::HashMap;
 use rotor_irc::{Message, Command};
 
-use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg};
+use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg, SendMsgKind};
 use common::line::{LineData, MsgKind};
 use common::types::{NetId, Nick};
 
@@ -190,6 +190,35 @@ impl IrcNetwork {
                 info!("Set initial nick to {}", nick);
                 self.nick = nick;
             },
+
+            CtcpQuery(ref user, _, ref query) if query.tag == "VERSION" => {
+                info!("Received CTCP version request from {}", user.nick);
+                {
+                    let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(BufTarget::Network, msg));
+                    let mut buf = self.get_buf_mut(&BufTarget::Network).unwrap();
+                    buf.push_line(LineData::Message {
+                        kind: MsgKind::Status,
+                        from: user.nick.clone(),
+                        msg: format!("*CTCP VERSION request*"),
+                    }, &mut buf_uh);
+                }
+
+                let vsn = env!("CARGO_PKG_VERSION");
+                let vsn_msg = format!("\u{1}VERSION distirc {}\u{1}", vsn);
+                self.send(Message {
+                    prefix: None,
+                    command: Command::NOTICE,
+                    args: vec![user.nick.clone()],
+                    body: Some(vsn_msg),
+                });
+            },
+            CtcpQuery(_, _, query) => {
+                info!("Ignoring unsupported CTCP query {}", query.tag);
+            },
+            CtcpReply(_, _, query) => {
+                info!("Ignoring unsupported CTCP reply {}", query.tag);
+            },
+
             UnknownCode(code, args, body) => {
                 warn!(target: "distirc::network::rplcode",
                       "Unknown reply code {:?} args: {:?} body: {:?}", code, args, body);
@@ -243,8 +272,10 @@ impl<'a> BufHandle<'a> {
         &self.netid
     }
 
-    /// Sends a PRIVMSG to this buffer's target.
-    pub fn send_privmsg<U>(&mut self, msg: String, u: &mut U)
+    /// Sends a message of the given kind to this buffer's target.
+    ///
+    /// You can only send `PrivMsg`, `Notice`, and `Action` messages.
+    pub fn send_msg<U>(&mut self, msg: String, kind: SendMsgKind, u: &mut U)
         where U: UpdateHandle<CoreMsg>
     {
         let targ = self.buf.id().clone();
@@ -258,11 +289,25 @@ impl<'a> BufHandle<'a> {
             },
         };
 
-        let ircmsg = Message {
-            prefix: None,
-            command: Command::PRIVMSG,
-            args: vec![dest.clone()],
-            body: Some(msg.clone()),
+        let ircmsg = match kind {
+            SendMsgKind::PrivMsg => Message {
+                prefix: None,
+                command: Command::PRIVMSG,
+                args: vec![dest.clone()],
+                body: Some(msg.clone()),
+            },
+            SendMsgKind::Notice => Message {
+                prefix: None,
+                command: Command::NOTICE,
+                args: vec![dest.clone()],
+                body: Some(msg.clone()),
+            },
+            SendMsgKind::Action => Message {
+                prefix: None,
+                command: Command::PRIVMSG,
+                args: vec![dest.clone()],
+                body: Some(format!("\u{1}ACTION {}\u{1}", msg)),
+            },
         };
         if self.try_send(ircmsg, u) {
             let nid = self.netid.clone();
@@ -271,7 +316,7 @@ impl<'a> BufHandle<'a> {
             });
 
             self.buf.push_line(LineData::Message {
-                kind: MsgKind::PrivMsg,
+                kind: kind.to_msg_kind(),
                 from: self.nick.clone(),
                 msg: msg,
             }, &mut buf_uh);

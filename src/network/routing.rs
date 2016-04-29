@@ -2,6 +2,9 @@
 //!
 //! This is surprisingly complicated :(
 
+use std::fmt;
+use std::str::FromStr;
+use std::ascii::AsciiExt;
 use rotor_irc::{Message, Command, Response};
 
 use common::line::{Sender, User};
@@ -19,6 +22,9 @@ pub enum BufferCmd {
 
     PRIVMSG(User, String),
     NOTICE(Sender, String),
+    /// This type represents a CTCP ACTION message. We distinguish these from
+    /// `NOTICE` and `PRIVMSG` because they are handled differently.
+    ACTION(User, String),
 
     RPL_NAMREPLY(String),
     RPL_ENDOFNAMES,
@@ -40,11 +46,28 @@ pub enum NetworkCmd {
     // The string is our nick.
     RPL_MYINFO(String),
 
+    /// A CTCP query from the given sender. The second arg is the destination it
+    /// was sent to.
+    ///
+    /// Note: If you're looking for CTCP ACTION related stuff, see
+    /// `BufferCmd::ACTION`. ACTIONs are not handled as regular CTCP commands
+    /// since they act more like a different message type than a CTCP query.
+    CtcpQuery(User, String, CtcpMsg),
+    /// A CTCP response.
+    CtcpReply(User, String, CtcpMsg),
+
     /// Represents an unknown response code.
     ///
     /// Since, by definition, we don't know what to do with these, we just send
     /// them off to the network object as is.
     UnknownCode(Response, Vec<String>, Option<String>),
+}
+
+/// Represents a CTCP query.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CtcpMsg {
+    pub tag: String,
+    pub args: Vec<String>,
 }
 
 
@@ -188,8 +211,13 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
                 let user = try_user!(sender, "PRIVMSG").clone();
                 let dest = msg.args[0].clone();
                 let message = msg.body.unwrap();
-                let bc = BufferCmd::PRIVMSG(user.clone(), message);
-                route_target(dest, user, cur_nick, bc)
+
+                if message.starts_with("\u{1}") {
+                    route_ctcp_msg(dest, user, cur_nick, Command::PRIVMSG, message)
+                } else {
+                    let bc = BufferCmd::PRIVMSG(user.clone(), message);
+                    route_target(dest, user, cur_nick, bc)
+                }
             })
         },
         Command::NOTICE => {
@@ -201,11 +229,21 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
 
                 let dest = msg.args[0].clone();
                 let message = msg.body.unwrap();
-                let bc = BufferCmd::NOTICE(sender.clone(), message);
 
-                match sender {
-                    Sender::User(u) => route_target(dest, u, cur_nick, bc),
-                    Sender::Server(_) => Some(RoutedMsg::NetBuffer(bc)),
+                if message.starts_with("\u{1}") {
+                    if let Sender::User(user) = sender {
+                        route_ctcp_msg(dest, user, cur_nick, Command::NOTICE, message)
+                    } else {
+                        error!("Ignored CTCP reply from a server. This isn't supported");
+                        return None;
+                    }
+                } else {
+                    let bc = BufferCmd::NOTICE(sender.clone(), message);
+
+                    match sender {
+                        Sender::User(u) => route_target(dest, u, cur_nick, bc),
+                        Sender::Server(_) => Some(RoutedMsg::NetBuffer(bc)),
+                    }
                 }
             })
         },
@@ -291,4 +329,104 @@ fn route_target(targ: String, user: User, cur_nick: &str, msg: BufferCmd) -> Opt
         trace!("Routed channel message to {}", targ);
         Some(RoutedMsg::Channel(targ, msg))
     }
+}
+
+
+/// Routes a CTCP message.
+fn route_ctcp_msg(targ: String, user: User, cur_nick: &str, cmd: Command, msg: String) -> Option<RoutedMsg> {
+    debug_assert!(msg.starts_with("\u{1}"));
+    trace!("Parsing CTCP privmsg: {:?}", msg);
+    match msg.parse::<CtcpMsg>() {
+        Ok(ref msg) if &msg.tag.to_ascii_uppercase() == "ACTION" => {
+            let bc = BufferCmd::ACTION(user.clone(), msg.args.join(" "));
+            route_target(targ, user, cur_nick, bc)
+        },
+        Ok(msg) => {
+            match cmd {
+                Command::PRIVMSG =>
+                    Some(RoutedMsg::Network(NetworkCmd::CtcpQuery(user, targ, msg))),
+                Command::NOTICE =>
+                    Some(RoutedMsg::Network(NetworkCmd::CtcpQuery(user, targ, msg))),
+                _ => unreachable!(),
+            }
+        },
+        Err(e) => {
+            error!("Error parsing CTCP message: {}", e);
+            None
+        }
+    }
+}
+
+/// Writes a CTCP message without the surrounding \u{1} chars.
+impl fmt::Display for CtcpMsg {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        try!(write!(f, "{}", self.tag));
+        for arg in self.args.iter() {
+            try!(write!(f, " {}", arg));
+        }
+        Ok(())
+    }
+}
+
+impl FromStr for CtcpMsg {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<CtcpMsg, String> {
+        if !s.starts_with("\u{1}") {
+            return Err("Not a valid CTCP message".to_owned());
+        }
+        let s = &s[1..];
+        let end = s.find("\u{1}").unwrap_or(s.len());
+
+        let s = &s[..end];
+        let mut arg_iter = s.split(" ");
+        let tag = arg_iter.next().ok_or("Missing CTCP tag".to_owned());
+        let tag = try!(tag).to_ascii_uppercase();
+        let args: Vec<_> = arg_iter.map(|s| s.to_owned()).collect();
+        Ok(CtcpMsg {
+            tag: tag,
+            args: args,
+        })
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::CtcpMsg;
+
+    // Adapted from rotor_irc::message::tests
+    macro_rules! parse_fmt_test {
+        ( $parse_name: ident, $fmt_name: ident, $body: block ) => {
+            #[test]
+            fn $parse_name() {
+                let (s, msg) = $body;
+                assert_eq!(s.parse::<CtcpMsg>().unwrap(), msg)
+            }
+
+            #[test]
+            fn $fmt_name() {
+                let (s, msg) = $body;
+                assert_eq!(&format!("\u{1}{}\u{1}", msg), s);
+            }
+        }
+    }
+
+    parse_fmt_test!(parse_ctcp_action, format_ctcp_action, {
+        let s = "\u{1}ACTION slaps user with a large trout\u{1}";
+        let msg = CtcpMsg {
+            tag: "ACTION".to_owned(),
+            args: "slaps user with a large trout".split(" ").map(|s| s.to_owned()).collect(),
+        };
+        (s, msg)
+    });
+
+    parse_fmt_test!(parse_ctcp_basic, format_ctcp_basic, {
+        let s = "\u{1}ACTION slaps user with a large trout\u{1}";
+        let msg = CtcpMsg {
+            tag: "ACTION".to_owned(),
+            args: "slaps user with a large trout".split(" ").map(|s| s.to_owned()).collect(),
+        };
+        (s, msg)
+    });
 }

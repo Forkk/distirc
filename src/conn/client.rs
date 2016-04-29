@@ -249,9 +249,9 @@ impl Client {
                     bufs: bufs, rx: rx, uid: uid
                 }).send(CoreMsg::NetMsg(buf.netid().clone(), nmsg))
             },
-            ClientBufMsg::SendMsg(ref msg) => {
+            ClientBufMsg::SendMsg(ref msg, ref kind) => {
                 let mut u = BaseUpdateHandle::<CoreMsg>::new();
-                buf.send_privmsg(msg.clone(), &mut u);
+                buf.send_msg(msg.clone(), *kind, &mut u);
                 if !u.take_alerts().is_empty() {
                     // TODO: Implement this
                     error!("Cannot send alerts in response to client `SendMsg` message");

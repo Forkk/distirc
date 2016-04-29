@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use rustbox::RustBox;
 
-use common::line::LineData;
+use common::line::{LineData, MsgKind};
 
 use model::Buffer;
 
@@ -61,8 +61,19 @@ impl BufferView {
             let time = format!("{0: >1$}", timefmt, self.time_col_w);
 
             let dy = match line.data {
-                LineData::Message { kind: ref _k, ref from, ref msg, .. } => {
-                    let from = format!("<{}>", from);
+                LineData::Message { ref kind, ref from, ref msg, .. } => {
+                    let (from, msg) = match *kind {
+                        MsgKind::PrivMsg =>
+                            (format!("<{}>", from), msg.to_owned()),
+                        MsgKind::Notice =>
+                            (format!("[{}]", from), msg.to_owned()),
+                        MsgKind::Action =>
+                            (format!(" * "), format!("{} {}", from, msg)),
+                        MsgKind::Response(_) =>
+                            (format!("{}", from), msg.to_owned()),
+                        MsgKind::Status =>
+                            (format!("*{}*", from), msg.to_owned()),
+                    };
                     self.render_line(y, rb, &time, &from, &msg)
                 },
                 LineData::Topic { ref by, ref topic } => {

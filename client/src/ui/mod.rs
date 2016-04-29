@@ -201,6 +201,9 @@ impl TermUi {
                     self.status(format!("Usage: /nick [network] [new nick]"));
                 }
             },
+            "me" => {
+                self.model.send_action(&self.key, args.to_owned());
+            },
             _ => {
                 self.status(format!("Unrecognized command: {}", cmd));
             },

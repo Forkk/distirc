@@ -56,6 +56,8 @@ pub enum LineData {
 pub enum MsgKind {
     PrivMsg,
     Notice,
+    /// Used for CTCP ACTIONs
+    Action,
     // FIXME: The below is not encodable
     /// IRC response codes
     Response(u16),

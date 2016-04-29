@@ -61,6 +61,25 @@ impl fmt::Display for Password {
 }
 
 
+/// Enumeration of the kinds of messages we can send.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub enum SendMsgKind {
+    PrivMsg,
+    Notice,
+    Action,
+}
+
+impl SendMsgKind {
+    pub fn to_msg_kind(&self) -> MsgKind {
+        match *self {
+            SendMsgKind::PrivMsg => MsgKind::PrivMsg,
+            SendMsgKind::Notice => MsgKind::Notice,
+            SendMsgKind::Action => MsgKind::Action,
+        }
+    }
+}
+
+
 // Message types
 
 mod core {
@@ -147,7 +166,8 @@ mod core {
 
 mod client {
     use types::{NetId, BufId, Nick};
-    use super::{BufTarget, Password};
+    use super::{BufTarget, SendMsgKind, Password};
+
     /// Messages sent from the client.
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum ClientMsg {
@@ -193,7 +213,7 @@ mod client {
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum ClientBufMsg {
         /// Sends a message to the buffer.
-        SendMsg(String),
+        SendMsg(String, SendMsgKind),
 
         /// Requests that the core part the channel with the given message.
         PartChan(Option<String>),

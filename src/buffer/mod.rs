@@ -214,6 +214,14 @@ impl Buffer {
                     msg: msg.clone(),
                 }, u)
             },
+            ACTION(user, msg) => {
+                // NOTE: Should we check actions for pings?
+                self.push_line(LineData::Message {
+                    kind: MsgKind::Action,
+                    from: user.nick.to_owned(),
+                    msg: msg.clone(),
+                }, u)
+            },
 
             RPL_NAMREPLY(body) => {
                 if self.names_ended { self.users.clear(); }
