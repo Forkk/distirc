@@ -67,6 +67,11 @@ impl Buffer {
         &self.id
     }
 
+    /// Gets the network ID for this buffer's network.
+    pub fn nid(&self) -> &NetId {
+        &self.nid
+    }
+
 
     /// True if a user with the given nick is present in the channel.
     pub fn has_user(&self, nick: &str) -> bool {

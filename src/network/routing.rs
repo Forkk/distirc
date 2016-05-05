@@ -41,7 +41,6 @@ pub enum BufferCmd {
 pub enum NetworkCmd {
     QUIT(User, Option<String>),
     NICK(User, String),
-    PING(Vec<String>, Option<String>),
 
     // The string is our nick.
     RPL_MYINFO(String),
@@ -306,8 +305,8 @@ pub fn route_message(msg: Message, cur_nick: &str) -> Option<RoutedMsg> {
 
 
         Command::PING => {
-            let cmd = NetworkCmd::PING(msg.args, msg.body);
-            Some(RoutedMsg::Network(cmd))
+            error!("PING wasn't handled by the connection state machine");
+            None
         },
         _ => {
             error!("Ignoring unrouted message: {}", msg);

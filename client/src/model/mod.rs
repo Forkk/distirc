@@ -141,7 +141,7 @@ impl CoreModel {
 
     /// Asks the core to part from the given channel
     pub fn send_part(&mut self, netid: String, chan: String, msg: String) {
-        self.send_buf(&BufKey::Channel(netid, chan), ClientBufMsg::PartChan(Some(msg)));
+        self.send_net(&netid, ClientNetMsg::PartChan(chan, Some(msg)));
     }
 
     /// Requests more logs from the given buffer.
@@ -222,7 +222,7 @@ impl CoreModel {
                 info!("Adding networks: {:?}", nets);
                 for net in nets {
                     for buf in net.buffers {
-                        self.create_remote_buf(net.name.clone(), buf);
+                        self.create_remote_buf(net.id.clone(), buf);
                     }
                 }
             },

@@ -1,7 +1,6 @@
 //! Manages a network's IRC connection
 
-use std::sync::mpsc::{channel, Sender, Receiver};
-use rotor::{Notifier, Scope};
+use rotor::Scope;
 use rotor_irc::{Message, Command, IrcMachine, IrcAction};
 
 use common::types::NetId;
@@ -10,6 +9,7 @@ use common::messages::CoreMsg;
 use conn::Context;
 use config::UserId;
 use handle::{UpdateHandle, BaseUpdateHandle};
+use network::IrcSendRx;
 
 /// Gets a user from the scope or closes the connection.
 macro_rules! try_usr {
@@ -17,7 +17,7 @@ macro_rules! try_usr {
     //     try_usr!(target: module_path!(), $scope, $uid)
     // };
     ( $logid: expr, $scope: expr, $uid: expr ) => {
-        if let Some(usr) = $scope.users.get_mut($uid) {
+        if let Some(usr) = $scope.core.get_user_mut($uid) {
             usr
         } else {
             error!("{}: Missing associated user {} for IRC network connection", $logid, $uid);
@@ -32,7 +32,7 @@ macro_rules! try_net {
     //     try_net!(target: module_path!(), $scope, $uid)
     // };
     ( $logid: expr, $usr: expr, $nid: expr ) => {{
-        if let Some(net) = $usr.state.get_network_mut($nid) {
+        if let Some(net) = $usr.get_net_mut($nid) {
             net
         } else {
             error!("{}: Missing associated network object {} for IRC network connection", $logid, $nid);
@@ -47,7 +47,7 @@ macro_rules! try_net {
 pub struct IrcNetConn {
     uid: UserId,
     nid: NetId,
-    rx: Receiver<Message>,
+    rx: IrcSendRx,
     state: NetConnState,
     // Identification string printed in log messages.
     log_id: String,
@@ -76,29 +76,23 @@ impl IrcMachine for IrcNetConn {
     type Seed = (UserId, NetId);
 
     fn create(seed: (UserId, NetId), scope: &mut Scope<Self::Context>) -> IrcAction<Self> {
-        let log_id = format!("{}.{}", seed.0, seed.1);
+        let (uid, nid) = seed;
+        let log_id = format!("{}.{}", uid, nid);
         debug!("{}: Starting IRC connection", &log_id);
 
-        let (tx, rx) = channel();
         let notif = scope.notifier();
-        let sender = IrcSender {
-            tx: tx,
-            notif: notif,
-        };
-
-        let usr = try_usr!(&log_id, scope, &seed.0);
+        let usr = try_usr!(&log_id, scope, &uid);
         let mut u = BaseUpdateHandle::<CoreMsg>::new();
-        let (nname, uname, rname) = {
-            let mut net = try_net!(&log_id, usr, &seed.1);
-            let nid = seed.1.clone();
-            net.connected(sender, &mut u.wrap(|msg| CoreMsg::NetMsg(nid.clone(), msg)));
-            (net.cfg.nick().to_owned(), net.cfg.username().to_owned(), net.cfg.realname().to_owned())
+        let (rx, nname, uname, rname) = {
+            let mut net = try_net!(&log_id, usr, &nid);
+            let rx = net.register_conn(notif, &mut u);
+            (rx, net.cfg.nick().to_owned(), net.cfg.username().to_owned(), net.cfg.realname().to_owned())
         };
-        usr.send_handle_msgs(u);
+        usr.exec_update_handle(u);
 
         let state = IrcNetConn {
-            uid: seed.0,
-            nid: seed.1,
+            uid: uid,
+            nid: nid,
             rx: rx,
             state: NetConnState::Identifying,
             log_id: log_id,
@@ -124,7 +118,16 @@ impl IrcMachine for IrcNetConn {
         let usr = try_usr!(&self.log_id, scope, &self.uid);
         let mut msgs = vec![];
         let mut u = BaseUpdateHandle::<CoreMsg>::new();
-        {
+
+        if let Message { command: Command::PING, args, body, .. } = msg {
+            debug!("Sending pong: {:?} {:?}", args, body);
+            msgs.push(Message {
+                prefix: None,
+                command: Command::PONG,
+                args: args,
+                body: body,
+            });
+        } else {
             use rotor_irc::Response::*;
             let mut net = try_net!(&self.log_id, usr, &self.nid);
             let nid = self.nid.clone();
@@ -178,18 +181,27 @@ impl IrcMachine for IrcNetConn {
                 },
             }
         }
-        usr.send_handle_msgs(u);
+        usr.exec_update_handle(u);
         for msg in msgs.iter() {
             debug!("{}: Sending message: {}", &self.log_id, msg);
         }
         IrcAction::ok(self).send_all(msgs)
     }
 
-    fn wakeup(self, _s: &mut Scope<Self::Context>) -> IrcAction<Self> {
+    fn wakeup(mut self, _s: &mut Scope<Self::Context>) -> IrcAction<Self> {
         let mut msgs = vec![];
-        while let Ok(msg) = self.rx.try_recv() {
-            debug!("{}: Sending message: {}", &self.log_id, msg);
-            msgs.push(msg);
+        loop {
+            match self.rx.recv() {
+                Ok(Some(msg)) => {
+                    debug!("{}: Sending message: {}", &self.log_id, msg);
+                    msgs.push(msg);
+                },
+                Ok(None) => break,
+                Err(_) => {
+                    error!("{}: IRC message sender dropped. Disconnecting", &self.log_id);
+                    return IrcAction::close();
+                },
+            }
         }
         trace!("{}: Sending messages: {:?}", &self.log_id, msgs);
         IrcAction::ok(self).send_all(msgs)
@@ -197,35 +209,19 @@ impl IrcMachine for IrcNetConn {
 
     fn disconnect(self, scope: &mut Scope<Self::Context>) {
         info!("{}: Disconnected from IRC", &self.log_id);
-        if let Some(usr) = scope.users.get_mut(&self.uid) {
+        if let Some(usr) = scope.core.get_user_mut(&self.uid) {
             let mut u = BaseUpdateHandle::<CoreMsg>::new();
-            if let Some(net) = usr.state.get_network_mut(&self.nid) {
+            if let Some(net) = usr.get_net_mut(&self.nid) {
                 let nid = self.nid.clone();
-                net.disconnected(&mut u.wrap(|msg| CoreMsg::NetMsg(nid.clone(), msg)));
+                net.disconnect(&mut u.wrap(|msg| CoreMsg::NetMsg(nid.clone(), msg)));
             } else {
                 error!("{}: Missing associated network {} for IRC network connection", &self.log_id, self.nid);
                 return;
             }
-            usr.send_handle_msgs(u);
+            usr.exec_update_handle(u);
         } else {
             error!("{}: Missing associated user {} for IRC network connection", &self.log_id, self.uid);
             return;
         }
-    }
-}
-
-
-
-/// Represents a handle to queue IRC messages for sending.
-pub struct IrcSender {
-    tx: Sender<Message>,
-    notif: Notifier,
-}
-
-impl IrcSender {
-    /// Sends the given message. Does nothing if the connection was dropped.
-    pub fn send(&mut self, msg: Message) {
-        let _ = self.tx.send(msg);
-        let _ = self.notif.wakeup();
     }
 }

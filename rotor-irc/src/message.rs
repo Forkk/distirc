@@ -17,6 +17,17 @@ pub struct Message {
     pub body: Option<String>,
 }
 
+impl Message {
+    pub fn new(prefix: Option<String>, cmd: Command, args: Vec<String>, body: Option<String>) -> Message {
+        Message {
+            prefix: prefix,
+            command: cmd,
+            args: args,
+            body: body,
+        }
+    }
+}
+
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref pfx) = self.prefix {

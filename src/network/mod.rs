@@ -1,5 +1,8 @@
-use std::ops::{Deref, DerefMut};
+use std::fmt;
+use std::error::Error;
 use std::collections::HashMap;
+use std::collections::hash_map;
+use rotor::Notifier;
 use rotor_irc::{Message, Command};
 
 use common::messages::{NetInfo, BufTarget, CoreMsg, CoreNetMsg, SendMsgKind};
@@ -11,86 +14,67 @@ use buffer::Buffer;
 use handle::UpdateHandle;
 
 mod routing;
+mod sender;
 
 pub use self::routing::{RoutedMsg, BufferCmd, NetworkCmd};
 use self::routing::route_message;
-use conn::irc::IrcSender;
 
-/// This struct represents an IRC network and its state, including the
-/// connection.
+use self::sender::IrcSender;
+pub use self::sender::IrcSendRx;
+
+
+/// An IRC network.
+///
+/// This consists of two main parts, a `BufSet`, which is a container for the
+/// network's buffers, and an optional `IrcConn`, which, when the network is
+/// connected, keeps track of the state of the IRC connection and provides an
+/// interface for sending messages to the IRC netowrk.
 pub struct IrcNetwork {
-    name: NetId,
+    id: NetId,
+    nick: Nick,
     pub cfg: NetConfig,
-    nick: String,
-    // serv_buf: Buffer,
     bufs: HashMap<BufTarget, Buffer>,
     conn: Option<IrcSender>,
 }
 
-// External API
+/// Buffer access and other info
 impl IrcNetwork {
+    /// Gets the network ID.
+    pub fn id(&self) -> &NetId {
+        &self.id
+    }
+
+    /// Returns an iterator over the buffers in the set.
+    pub fn iter_bufs(&self) -> IterBufs {
+        self.bufs.iter()
+    }
+
+    /// Returns an iterator over the buffers in the set.
+    pub fn iter_bufs_mut(&mut self) -> IterBufsMut {
+        self.bufs.iter_mut()
+    }
+
     /// Gets a reference to the given buffer if it exists.
     pub fn get_buf(&self, targ: &BufTarget) -> Option<&Buffer> {
         self.bufs.get(targ)
     }
 
-    /// Gets a handle to the given buffer if it exists.
-    ///
-    /// See `BufHandle`
-    pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<BufHandle<'a>> {
-        let id = self.name.clone();
-        let nick = self.nick.clone();
-        if let Some(buf) = self.bufs.get_mut(targ) {
-            Some(BufHandle {
-                conn: self.conn.as_mut(),
-                buf: buf,
-                netid: id,
-                nick: nick,
-            })
-        } else { None }
-    }
-
-
-    /// Joins the given channel.
-    pub fn join_chan(&mut self, chan: String) {
-        // TODO: Tell the client who requested the join that we joined it.
-        self.send(Message {
-            prefix: None,
-            command: Command::JOIN,
-            args: vec![chan],
-            body: None,
-        });
-    }
-
-    /// Asks to change to the given nick.
-    pub fn change_nick(&mut self, nick: Nick) {
-        self.send(Message {
-            prefix: None,
-            command: Command::NICK,
-            args: vec![nick],
-            body: None,
-        });
-    }
-
-    /// Sends the given IRC message.
-    ///
-    /// If we're not connected to IRC, logs an error and does nothing.
-    fn send(&mut self, msg: Message) {
-        if let Some(ref mut sender) = self.conn {
-            sender.send(msg);
-        } else {
-            error!("Tried to send a message while disconnected from IRC. Message: {:?}", msg);
-        }
+    /// Gets a mutable reference to the given buffer.
+    pub fn get_buf_mut<'a>(&'a mut self, targ: &BufTarget) -> Option<&mut Buffer> {
+        self.bufs.get_mut(targ)
     }
 }
 
-// Connection Handling
+pub type IterBufs<'a> = hash_map::Iter<'a, BufTarget, Buffer>;
+pub type IterBufsMut<'a> = hash_map::IterMut<'a, BufTarget, Buffer>;
+
+/// IRC message handling
 impl IrcNetwork {
-    pub fn new(name: String, cfg: &NetConfig) -> IrcNetwork {
+    pub fn new(id: String, cfg: &NetConfig) -> IrcNetwork {
         // TODO: Allow configuring reconnection settings.
         // TODO: Allow configuring encoding.
         IrcNetwork {
-            name: name.to_owned(),
+            id: id.to_owned(),
             cfg: cfg.clone(),
             nick: String::new(),
             conn: None,
@@ -98,28 +82,43 @@ impl IrcNetwork {
         }
     }
 
-    /// Called when we've connected to IRC with an `IrcSender` that can be used
-    /// to send messages.
-    pub fn connected<U>(&mut self, sender: IrcSender, u: &mut U)
-        where U : UpdateHandle<CoreNetMsg>
+    /// Used to register a connection state machine as the connection for this
+    /// network.
+    ///
+    /// When a connection connects to an IRC network, it calls this method with
+    /// a notifier that will wake it up and the current nick. This method will
+    /// return an `IrcConnRx` object which the connection should read messages
+    /// from when it is woken up by the notifier.
+    ///
+    /// # Panics
+    ///
+    /// Currently this panics if there is already a connection. This should
+    /// probably change in the future.
+    pub fn register_conn<U>(&mut self, notif: Notifier, u: &mut U) -> IrcSendRx
+        where U : UpdateHandle<CoreMsg>
     {
         if self.conn.is_none() {
-            self.conn = Some(sender);
-            u.send_clients(CoreNetMsg::Connection(true))
+            let (conn, rx) = IrcSender::new(notif);
+            self.conn = Some(conn);
+            u.send_clients(CoreMsg::NetMsg(self.id.clone(), CoreNetMsg::Connection(true)));
+            rx
         } else {
-            panic!("Two connections for network {}", self.name)
+            panic!("Two connections for network {}", self.id)
         }
     }
 
-    /// Called when we've disconnected from IRC.
-    pub fn disconnected<U>(&mut self, u: &mut U)
+    /// Unregisters the current connection.
+    ///
+    /// This will eventually be done automatically if the paired `IrcConnRx` is
+    /// dropped.
+    pub fn disconnect<U>(&mut self, u: &mut U)
         where U : UpdateHandle<CoreNetMsg>
     {
         self.conn = None;
-        u.send_clients(CoreNetMsg::Connection(false))
+        u.send_clients(CoreNetMsg::Connection(false));
     }
 
-    /// Handles messages from IRC.
+    /// Handles a message from IRC
     pub fn handle_msg<U>(&mut self, msg: Message, u: &mut U)
         where U : UpdateHandle<CoreNetMsg>
     {
@@ -150,7 +149,7 @@ impl IrcNetwork {
         }
     }
 
-    /// Handles network-routed messages.
+    /// Handles network-routed IRC messages.
     fn handle_net_cmd<U>(&mut self, cmd: NetworkCmd, u: &mut U)
         where U : UpdateHandle<CoreNetMsg>
     {
@@ -177,15 +176,6 @@ impl IrcNetwork {
                     }
                 }
             },
-            PING(args, body) => {
-                debug!("Replying to PING");
-                self.send(Message {
-                    prefix: None,
-                    command: Command::PONG,
-                    args: args,
-                    body: body,
-                });
-            },
             RPL_MYINFO(nick) => {
                 info!("Set initial nick to {}", nick);
                 self.nick = nick;
@@ -205,12 +195,13 @@ impl IrcNetwork {
 
                 let vsn = env!("CARGO_PKG_VERSION");
                 let vsn_msg = format!("\u{1}VERSION distirc {}\u{1}", vsn);
-                self.send(Message {
+                // We don't care too much if we fail to respond to CTCP.
+                let _ = self.send(Message {
                     prefix: None,
                     command: Command::NOTICE,
                     args: vec![user.nick.clone()],
                     body: Some(vsn_msg),
-                });
+                }, u);
             },
             CtcpQuery(_, _, query) => {
                 info!("Ignoring unsupported CTCP query {}", query.tag);
@@ -231,7 +222,7 @@ impl IrcNetwork {
         where U : UpdateHandle<CoreNetMsg>
     {
         if !self.bufs.contains_key(&targ) {
-            let buf = Buffer::new(self.name.clone(), targ.clone());
+            let buf = Buffer::new(self.id.clone(), targ.clone());
             u.send_clients(CoreNetMsg::Buffers(vec![buf.as_info()]));
             self.bufs.entry(targ.clone()).or_insert(buf)
         } else {
@@ -240,68 +231,91 @@ impl IrcNetwork {
     }
 }
 
-// Message data
+/// IRC message sending
 impl IrcNetwork {
-    /// Gets `NetInfo` data for this buffer.
-    pub fn to_info(&self) -> NetInfo {
-        let mut bufs = vec![];
-        for (_id, buf) in self.bufs.iter() { bufs.push(buf.as_info()); }
-        NetInfo {
-            name: self.name.clone(),
-            nick: self.nick.clone(),
-            buffers: bufs,
+    /// Sends the given IRC message.
+    ///
+    /// If we're not connected to IRC, logs an error and does nothing.
+    pub fn send<U>(&mut self, msg: Message, u: &mut U) -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
+    {
+        Self::send_with_conn(&mut self.conn, msg, u)
+    }
+
+    // For sending without borrowing `self` completely
+    fn send_with_conn<U>(conn: &mut Option<IrcSender>, msg: Message, u: &mut U) -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
+    {
+        if let Some(sender) = conn.take() {
+            if let Some(sender) = sender.send(msg.clone()) {
+                info!("Sent message: {}", msg);
+                *conn = Some(sender);
+                Ok(())
+            } else {
+                error!("Connection dropped while sending message: {}", msg);
+                *conn = None;
+                u.send_clients(CoreNetMsg::Connection(false));
+                Err(IrcSendErr::Disconnected)
+            }
+        } else {
+            error!("Tried to send a message while disconnected from IRC. Message: {}", msg);
+            Err(IrcSendErr::Disconnected)
         }
     }
-}
 
-
-/// A reference to a `Buffer` returned by `IrcNetwork::get_buf_mut`.
-///
-/// This is a struct which derefs to `Buffer` to provide access to the buffer,
-/// and also provides additional functions for sending messages to the IRC
-/// server.
-pub struct BufHandle<'a> {
-    nick: Nick,
-    netid: NetId,
-    buf: &'a mut Buffer,
-    conn: Option<&'a mut IrcSender>,
-}
-
-impl<'a> BufHandle<'a> {
-    pub fn netid(&self) -> &NetId {
-        &self.netid
+    /// Attempts to join the given channel.
+    pub fn send_join_chan<U>(&mut self, chan: String, u: &mut U)
+                             -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
+    {
+        self.send(Message::new(None, Command::JOIN, vec![chan], None), u)
     }
 
-    /// Sends a message of the given kind to this buffer's target.
-    ///
-    /// You can only send `PrivMsg`, `Notice`, and `Action` messages.
-    pub fn send_msg<U>(&mut self, msg: String, kind: SendMsgKind, u: &mut U)
-        where U: UpdateHandle<CoreMsg>
+    /// Attempts to join the given channel.
+    pub fn send_part_chan<U>(&mut self, chan: String, optmsg: Option<String>, u: &mut U)
+                             -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
     {
-        let targ = self.buf.id().clone();
+        self.send(Message::new(None, Command::PART, vec![chan], optmsg), u)
+    }
+
+    /// Changes nick to the given nick.
+    pub fn send_change_nick<U>(&mut self, nick: String, u: &mut U)
+                               -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
+    {
+        self.send(Message::new(None, Command::NICK, vec![nick], None), u)
+    }
+
+    /// Sends a `PrivMsg`, `Action`, or `Notice` to the buffer specified by
+    /// `targ`.
+    ///
+    /// # Errors
+    ///
+    /// If no such buffer exists, we aren't joined in the target
+    /// channel, or the target user is offline, returns
+    /// `Err(IrcSendErr::Unavail)`.
+    ///
+    /// If we're not connected to IRC, returns `Err(IrcSendErr::Disconnected)`.
+    pub fn send_chat_msg<U>(&mut self, targ: BufTarget, msg: String, kind: SendMsgKind, u: &mut U)
+                        -> Result<(), IrcSendErr>
+        where U : UpdateHandle<CoreNetMsg>
+    {
+        let buf = try!(self.bufs.get_mut(&targ).ok_or(IrcSendErr::Unavail));
         let dest = match targ {
-            BufTarget::Channel(ref dest) => dest,
-            BufTarget::Private(ref dest) => dest,
+            BufTarget::Channel(ref dest) => dest.clone(),
+            BufTarget::Private(ref dest) => dest.clone(),
             BufTarget::Network => {
                 warn!("Can't send PRIVMSG to network buffer");
                 // FIXME: What should this do?
-                return;
+                return Err(IrcSendErr::BadTarget);
             },
         };
-
         let ircmsg = match kind {
-            SendMsgKind::PrivMsg => Message {
-                prefix: None,
-                command: Command::PRIVMSG,
-                args: vec![dest.clone()],
-                body: Some(msg.clone()),
-            },
-            SendMsgKind::Notice => Message {
-                prefix: None,
-                command: Command::NOTICE,
-                args: vec![dest.clone()],
-                body: Some(msg.clone()),
-            },
+            SendMsgKind::PrivMsg =>
+                Message::new(None, Command::PRIVMSG, vec![dest.clone()], Some(msg.clone())),
+            SendMsgKind::Notice =>
+                Message::new(None, Command::NOTICE, vec![dest.clone()], Some(msg.clone())),
             SendMsgKind::Action => Message {
                 prefix: None,
                 command: Command::PRIVMSG,
@@ -309,59 +323,60 @@ impl<'a> BufHandle<'a> {
                 body: Some(format!("\u{1}ACTION {}\u{1}", msg)),
             },
         };
-        if self.try_send(ircmsg, u) {
-            let nid = self.netid.clone();
-            let mut buf_uh = u.wrap(|msg| {
-                CoreMsg::NetMsg(nid.clone(), CoreNetMsg::BufMsg(targ.clone(), msg))
-            });
+        let r = Self::send_with_conn(&mut self.conn, ircmsg, u);
+        if r.is_ok() {
+            let mut buf_uh = u.wrap(|msg| CoreNetMsg::BufMsg(targ.clone(), msg));
 
-            self.buf.push_line(LineData::Message {
+            debug_assert!(!self.nick.is_empty(), "Sending message with empty nick");
+            buf.push_line(LineData::Message {
                 kind: kind.to_msg_kind(),
                 from: self.nick.clone(),
                 msg: msg,
             }, &mut buf_uh);
         }
+        r
     }
+}
 
-    pub fn part_chan<U>(&mut self, msg: &Option<String>, u: &mut U)
-        where U: UpdateHandle<CoreMsg>
-    {
-        let dest = match *self.buf.id() {
-            BufTarget::Channel(ref dest) => dest.clone(),
-            BufTarget::Private(ref dest) => dest.clone(),
-            BufTarget::Network => {
-                warn!("Ignored part command for net buffer");
-                return;
-            },
-        };
-
-        let ircmsg = Message {
-            prefix: None,
-            command: Command::PART,
-            args: vec![dest.clone()],
-            body: msg.clone(),
-        };
-        self.try_send(ircmsg, u);
-    }
-
-    fn try_send<U>(&mut self, msg: Message, u: &mut U) -> bool
-        where U: UpdateHandle<CoreMsg>
-    {
-        if let Some(ref mut conn) = self.conn {
-            conn.send(msg);
-            true
-        } else {
-            let emsg = "Failed to send IRC message. Not connected".to_owned();
-            u.send_clients(CoreMsg::Status(emsg));
-            false
+/// Message data
+impl IrcNetwork {
+    /// Gets `NetInfo` data for this buffer.
+    pub fn to_info(&self) -> NetInfo {
+        let mut bufs = vec![];
+        for (_id, buf) in self.bufs.iter() { bufs.push(buf.as_info()); }
+        NetInfo {
+            id: self.id.clone(),
+            nick: self.nick.clone(),
+            buffers: bufs,
         }
     }
 }
 
-impl<'a> Deref for BufHandle<'a> {
-    type Target = Buffer;
-    fn deref(&self) -> &Self::Target { self.buf }
+
+/// Errors that can happen when trying to send messages to IRC.
+#[derive(Debug, Clone)]
+pub enum IrcSendErr {
+    /// The target of the action (i.e., the buffer or user we're sending to) is
+    /// not available.
+    Unavail,
+    /// We're not connected to IRC anymore.
+    Disconnected,
+    /// The given target is invalid.
+    BadTarget,
 }
-impl<'a> DerefMut for BufHandle<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target { self.buf }
+
+impl Error for IrcSendErr {
+    fn description(&self) -> &str {
+        match *self {
+            IrcSendErr::Unavail => "Target buffer is unavailable",
+            IrcSendErr::Disconnected => "Not connected to IRC",
+            IrcSendErr::BadTarget => "Invalid target",
+        }
+    }
+}
+
+impl fmt::Display for IrcSendErr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.description())
+    }
 }

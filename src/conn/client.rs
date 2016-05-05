@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{channel, Receiver};
 use rotor::Scope;
 
 use common::conn::{Handler, Action};
@@ -8,11 +7,12 @@ use common::messages::{
     ClientMsg, ClientNetMsg, ClientBufMsg,
 };
 
+use state::{UserHandle, UserClientHandle};
 use config::UserId;
-use network::{IrcNetwork, BufHandle};
-use handle::BaseUpdateHandle;
+use network::IrcNetwork;
+use handle::{UpdateHandle, BaseUpdateHandle};
 
-use super::{Context, User, UserClients, UserClient};
+use super::Context;
 
 
 /// This machine handles a client's state.
@@ -22,7 +22,7 @@ pub enum Client {
     /// The client has authenticated as a user.
     Connected {
         uid: UserId,
-        rx: Receiver<CoreMsg>,
+        rx: UserClientHandle,
         bufs: HashMap<BufTarget, ClientBuf>,
     },
 }
@@ -37,25 +37,22 @@ impl Client {
     fn handle_auth_msgs(msg: &ClientMsg, s: &mut Scope<Context>) -> Action<Self> {
         if let &ClientMsg::Authenticate(ref uid, ref pass) = msg {
             let notif = s.notifier();
-            let usr = match s.users.get_mut(uid) {
+            let usr = match s.core.get_user_mut(uid) {
                 Some(u) => u,
                 None => {
                     error!("Unknown user state: {}", uid);
                     return Action::done();
                 },
             };
-            if &usr.state.cfg.password == &pass.0 {
+            if &usr.cfg.password == &pass.0 {
                 info!("Client authenticated successfully as {}", uid);
-                let (tx, rx) = channel();
 
-                usr.clients.0.push(UserClient {
-                    wake: notif,
-                    tx: tx,
-                });
+                // Register our client with the user.
+                let rx = usr.register_client(notif);
 
                 // Send the networks list.
                 let mut nets = vec![];
-                for (_nid, net) in usr.state.iter_nets() {
+                for (_nid, net) in usr.iter_nets() {
                     nets.push(net.to_info());
                 }
 
@@ -97,7 +94,7 @@ impl Handler for Client {
                 Self::handle_auth_msgs(msg, s)
             },
             Client::Connected { uid, rx, bufs } => {
-                let mut user = match s.users.get_mut(&uid) {
+                let mut user = match s.core.get_user_mut(&uid) {
                     Some(u) => u,
                     None => {
                         error!("Unknown user state: {}", uid);
@@ -114,31 +111,32 @@ impl Handler for Client {
         unreachable!("Unexpected timeout")
     }
 
-    fn wakeup(self, s: &mut Scope<Self::Context>) -> Action<Self> {
+    fn wakeup(self, _s: &mut Scope<Self::Context>) -> Action<Self> {
         trace!("Client woke up");
         match self {
             Client::Authing => {
                 warn!("Client was woken up during authentication phase");
                 Action::ok(self)
             },
-            Client::Connected { uid, rx, mut bufs } => {
+            Client::Connected { uid, mut rx, bufs } => {
                 // Send new messages to the client.
                 let mut msgs = vec![];
-                while let Ok(msg) = rx.try_recv() {
-                    // This is hacky, but it's really the only way to catch when
-                    // a client is told about a buffer. We do this so we can
-                    // ensure that we set a buffer's last sent index to the
-                    // appropriate line.
-                    if let CoreMsg::NetMsg(ref nid, CoreNetMsg::Buffers(ref bs)) = msg {
-                        for buf in bs {
-                            bufs.insert(buf.id.clone(), ClientBuf {
-                                last_sent_idx: s.users.get(&uid).unwrap().state
-                                    .get_network(&nid).unwrap()
-                                    .get_buf(&buf.id).unwrap()
-                                    .front_len(),
-                            });
-                        }
-                    }
+                while let Some(msg) = rx.recv() {
+                    // FIXME: This hack doesn't work. We need to find another way.
+                    // // This is hacky, but it's really the only way to catch when
+                    // // a client is told about a buffer. We do this so we can
+                    // // ensure that we set a buffer's last sent index to the
+                    // // appropriate line.
+                    // if let CoreMsg::NetMsg(ref nid, CoreNetMsg::Buffers(ref bs)) = msg {
+                    //     for buf in bs {
+                    //         bufs.insert(buf.id.clone(), ClientBuf {
+                    //             last_sent_idx: s.core.get_user(&uid).unwrap()
+                    //                 .get_net(&nid).unwrap()
+                    //                 .get_buf(&buf.id).unwrap()
+                    //                 .front_len(),
+                    //         });
+                    //     }
+                    // }
                     trace!("Sending client message: {:?}", msg);
                     msgs.push(msg);
                 }
@@ -151,11 +149,12 @@ impl Handler for Client {
 }
 
 impl Client {
-    fn handle_user_msg(self, msg: &ClientMsg, user: &mut User) -> Action<Self> {
-        match *msg {
+    fn handle_user_msg(self, msg: &ClientMsg, user: &mut UserHandle) -> Action<Self> {
+        let mut uh = BaseUpdateHandle::<CoreMsg>::new();
+        let act = match *msg {
             ClientMsg::NetMsg(ref nid, ref msg) => {
-                if let Some(ref mut net) = user.state.get_network_mut(&nid) {
-                    self.handle_net_msg(msg, net, &mut user.clients)
+                if let Some(ref mut net) = user.get_net_mut(&nid) {
+                    self.handle_net_msg(msg, net, &mut uh)
                 } else {
                     Action::ok(self)
                 }
@@ -170,24 +169,32 @@ impl Client {
             },
             ClientMsg::ListNets => {
                 let mut nets = vec![];
-                for (_nid, net) in user.state.iter_nets() {
+                for (_nid, net) in user.iter_nets() {
                     nets.push(net.to_info());
                 }
-
                 Action::ok(self).send(CoreMsg::Networks(nets))
             },
             ClientMsg::Authenticate(_, _) => {
                 error!("Authenticated client sent auth request. Ignoring.");
                 Action::ok(self)
             }
-        }
+        };
+        user.exec_update_handle(uh);
+        act
     }
 
-    fn handle_net_msg(self, msg: &ClientNetMsg, net: &mut IrcNetwork, clients: &mut UserClients) -> Action<Self> {
+    fn handle_net_msg(self,
+                      msg: &ClientNetMsg,
+                      net: &mut IrcNetwork,
+                      u: &mut BaseUpdateHandle<CoreMsg>)
+                      -> Action<Self>
+    {
+        let nid = net.id().clone();
+        let mut u = u.wrap(|msg| CoreMsg::NetMsg(nid.clone(), msg));
         match *msg {
             ClientNetMsg::BufMsg(ref targ, ref msg) => {
-                if let Some(mut buf) = net.get_buf_mut(&targ) {
-                    self.handle_buf_msg(msg, &mut buf, clients)
+                if let Some(_) = net.get_buf(&targ) {
+                    self.handle_buf_msg(msg, targ, net, &mut u)
                 } else {
                     warn!("Ignoring message for unknown buffer {:?}. Message: {:?}", targ, msg);
                     Action::ok(self)
@@ -198,32 +205,56 @@ impl Client {
                 Action::ok(self)
             },
             ClientNetMsg::JoinChan(ref chan) => {
-                net.join_chan(chan.clone());
-                Action::ok(self)
+                if let Err(e) = net.send_join_chan(chan.clone(), &mut u) {
+                    Action::ok(self).send(CoreMsg::Status(format!("Can't join channel: {}", e)))
+                } else {
+                    Action::ok(self)
+                }
+            },
+            ClientNetMsg::PartChan(ref chan, ref optmsg) => {
+                if let Err(e) = net.send_part_chan(chan.clone(), optmsg.clone(), &mut u) {
+                    Action::ok(self).send(CoreMsg::Status(format!("Can't part channel: {}", e)))
+                } else {
+                    Action::ok(self)
+                }
             },
             ClientNetMsg::ChangeNick(ref nick) => {
-                net.change_nick(nick.clone());
-                Action::ok(self)
+                if let Err(e) = net.send_change_nick(nick.clone(), &mut u) {
+                    Action::ok(self).send(CoreMsg::Status(format!("Can't change nick: {}", e)))
+                } else {
+                    Action::ok(self)
+                }
             },
         }
     }
 
-    fn handle_buf_msg(self,
-                      msg: &ClientBufMsg,
-                      buf: &mut BufHandle,
-                      clients: &mut UserClients)
-                      -> Action<Self>
+    fn handle_buf_msg<U>(self,
+                         msg: &ClientBufMsg,
+                         targ: &BufTarget,
+                         net: &mut IrcNetwork,
+                         u: &mut U)
+                         -> Action<Self>
+        where U : UpdateHandle<CoreNetMsg>
     {
         match *msg {
+            ClientBufMsg::SendMsg(ref msg, ref kind) => {
+                if let Err(e) = net.send_chat_msg(targ.clone(), msg.clone(), kind.clone(), u) {
+                    Action::ok(self).send(CoreMsg::Status(format!("Can't send to channel: {}", e)))
+                } else {
+                    Action::ok(self)
+                }
+            },
             ClientBufMsg::FetchLogs(count) => {
+                let buf = net.get_buf_mut(targ).unwrap();
+
                 let (mut bufs, rx, uid) = if let Client::Connected { bufs, rx, uid } = self {
                     (bufs, rx, uid)
                 } else { unreachable!(); };
 
                 let lines = {
-                    let mut cb = bufs.entry(buf.id().clone()).or_insert_with(|| {
+                    let mut cb = bufs.entry(targ.clone()).or_insert_with(|| {
                         error!("Missing `ClientBuf` entry for {:?}. Scrollback will probably be sent incorrectly.",
-                               buf.id());
+                               targ);
                         ClientBuf {
                             last_sent_idx: buf.front_len(),
                         }
@@ -240,38 +271,10 @@ impl Client {
                     }
                     lines
                 };
-                // } else {
-                //     warn!("Unauthed client tried to fetch logs");
-                //     return Action::done();
-                // };
                 let nmsg = CoreNetMsg::BufMsg(buf.id().clone(), CoreBufMsg::Scrollback(lines));
                 Action::ok(Client::Connected {
                     bufs: bufs, rx: rx, uid: uid
-                }).send(CoreMsg::NetMsg(buf.netid().clone(), nmsg))
-            },
-            ClientBufMsg::SendMsg(ref msg, ref kind) => {
-                let mut u = BaseUpdateHandle::<CoreMsg>::new();
-                buf.send_msg(msg.clone(), *kind, &mut u);
-                if !u.take_alerts().is_empty() {
-                    // TODO: Implement this
-                    error!("Cannot send alerts in response to client `SendMsg` message");
-                }
-                for msg in u.take_msgs() {
-                    clients.broadcast(&msg);
-                }
-                Action::ok(self)
-            },
-            ClientBufMsg::PartChan(ref optmsg) => {
-                let mut u = BaseUpdateHandle::<CoreMsg>::new();
-                buf.part_chan(optmsg, &mut u);
-                if !u.take_alerts().is_empty() {
-                    // TODO: Implement this
-                    error!("Cannot send alerts in response to client `SendMsg` message");
-                }
-                for msg in u.take_msgs() {
-                    clients.broadcast(&msg);
-                }
-                Action::ok(self)
+                }).send(CoreMsg::NetMsg(buf.nid().clone(), nmsg))
             },
         }
     }

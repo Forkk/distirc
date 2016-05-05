@@ -24,6 +24,7 @@ pub mod handle;
 pub mod network;
 pub mod buffer;
 pub mod conn;
+pub mod state;
 
 use self::config::read_config;
 use self::conn::{Client, Context, ConnSpawner};
@@ -58,7 +59,7 @@ fn main() {
     debug!("Creating context.");
     let mut ctx = Context::new(notif);
     for (uid, ucfg) in cfg.user.iter() {
-        ctx.add_user(uid, ucfg.clone());
+        ctx.core.add_user(uid.clone(), ucfg.clone());
     }
 
     debug!("Initializing context.");

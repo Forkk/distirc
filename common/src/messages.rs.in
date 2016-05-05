@@ -3,7 +3,7 @@
 /// Short summary data used to tell a client about a network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetInfo {
-    pub name: String,
+    pub id: String,
     pub nick: String,
     pub buffers: Vec<BufInfo>,
 }
@@ -22,7 +22,8 @@ impl BufInfo {
 }
 
 
-/// Identifies a buffer.
+/// This struct identifies a particular buffer within a network. It
+/// distinguishes between channels, private messages, and network buffers.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum BufTarget {
     /// An IRC channel buffer
@@ -205,6 +206,9 @@ mod client {
         /// name and send `Joined` to the client that sent the request.
         JoinChan(String),
 
+        /// Requests that the core part the channel with the given message.
+        PartChan(String, Option<String>),
+
         /// Requests that the core change the user's nick.
         ChangeNick(Nick),
     }
@@ -214,9 +218,6 @@ mod client {
     pub enum ClientBufMsg {
         /// Sends a message to the buffer.
         SendMsg(String, SendMsgKind),
-
-        /// Requests that the core part the channel with the given message.
-        PartChan(Option<String>),
 
         /// Requests that the core send the client `count` many lines of
         /// scrollback. The core will keep track of which lines haven't been
